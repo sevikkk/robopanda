@@ -6,8 +6,18 @@ Put here cartridge files:
 and any trace files:
   trace_*.bin
 
-Use ./decode_spi.sh <basename> for decoding trace file:
+Use ./decode_spi.sh <basename> [cartridge] for decoding trace file.
 
-For example: "./decode_spi.sh training" decodes file trace_training.bin 
+Use ./run_emu.sh <basename> [cartridge] for running trace file throught emulator.
+
+Examples: 
+
+"./decode_spi.sh training" - decodes file trace_training.bin 
 into training.txt and training_data.txt using cartridge_black.bin
 as cartridge image.
+
+"./run_emu.sh training" - runs emulator with trace training.txt and writes log
+into training.log using cartridge_black.bin as cartridge image.
+
+"./run_emu.sh test cartridge_test.bin" - runs emulator with trace test.txt
+using cartridge_test.bin as cartridge image.
