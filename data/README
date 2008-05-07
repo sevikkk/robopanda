@@ -1,0 +1,13 @@
+Put here cartridge files:
+
+  cartridge_black.bin
+  cartridge_white.bin
+
+and any trace files:
+  trace_*.bin
+
+Use ./decode_spi.sh <basename> for decoding trace file:
+
+For example: "./decode_spi.sh training" decodes file trace_training.bin 
+into training.txt and training_data.txt using cartridge_black.bin
+as cartridge image.
