@@ -74,8 +74,14 @@ class Player:
         self.c = cartridge
         self.state = "idle"
         self.pc = None
+        self.codec = None
+        self.len = None
+        self.start_chunk = 0
+        self.data_chunk = 0
 
-    def start(self, addr):
+    def start(self, ts, addr):
+        if self.state != "idle":
+            print "%9.3f %06X [PLAY] WARNING: player start in non-idle state: bytes left: %d" % (ts, addr, self.len)
         self.state = "init"
         self.pc = addr
 
@@ -91,18 +97,33 @@ class Player:
 
         if self.state == "init":
             print "%9.3f %06X [PLAY] init" % (ts, addr)
-            self.c.read(self.pc,254)
+            data = self.c.read(self.pc,254)
+            self.len = data[0] + (data[1]<<8) + (data[2]<<16) + (data[3] <<24)
+            self.codec = data[4]
+            print "%9.3f %06X [PLAY] INFO: playing audio chunk: %06X %06X %02X" % (ts, addr, self.pc, self.len, self.codec)
             self.pc += 254
+            self.len -= 254
             self.state = "init1"
+            if self.codec == 7:
+                self.start_chunk = 140
+                self.data_chunk = 32
+            elif self.codec == 9:
+                self.start_chunk = 156
+                self.data_chunk = 48
         elif self.state == "init1":
             print "%9.3f %06X [PLAY] init1" % (ts, addr)
-            self.c.read(self.pc,140)
-            self.pc += 140
+            self.c.read(self.pc,self.start_chunk)
+            self.pc += self.start_chunk
+            self.len -= self.start_chunk
             self.state = "data"
         elif self.state == "data":
             print "%9.3f %06X [PLAY] data" % (ts, addr)
-            self.c.read(self.pc,32)
-            self.pc += 32
+            self.c.read(self.pc,self.data_chunk)
+            self.pc += self.data_chunk
+            self.len -= self.data_chunk
+            if self.len == -356: #XXX
+                self.state = "idle"
+                print "%9.3f %06X [PLAY] INFO: done playing" % (ts, addr)
 
 class Mover:
     def __init__(self, cartridge, index_base, cx_offset):
@@ -113,7 +134,11 @@ class Mover:
         self.cx_off = cx_offset
         self.stack = []
 
-    def start(self, addr):
+    def start(self, ts, addr):
+        if self.state != "idle":
+            print "                 [MOVE] WARNING: mover start in non-idle state"
+            return
+        print "%9.3f %06X [MOVE] INFO: starting chunk: %04X" % (ts, addr*2 + self.ib, addr)
         self.state = "active"
         self.pc = addr
 
@@ -142,6 +167,7 @@ class Mover:
                     print "%9.3f %06X: [MOVE] [WARNING] Stack not empty" % (ts, addr, log_pc)
                 cmd_txt = "done"
                 self.state = "idle"
+                print "%9.3f %06X [MOVE] INFO: done moving" % (ts, addr)
             elif cmd == 0xF002:
                 cmd_txt = "wait_completion"
             elif cmd == 0xF003:
@@ -165,6 +191,7 @@ class Mover:
                     self.pc = self.stack.pop()
                 else:
                     self.state = "idle"
+                    print "%9.3f %06X [MOVE] INFO: done moving" % (ts, addr)
                 cmd_txt = "return"
             else:
                 cmd_txt = "cmd_%04X" % (cmd)
@@ -276,12 +303,12 @@ class CPU:
             a1,a2,a3,a4 = self.c.read(addr,4)
             addr = a1 + 256 * a2 + 65536 * a3
             print "%9.3f %06X [CPU] %06X: play (%02X %06X)" % (ts, real_addr, pc, a4, addr)
-            self.player.start(addr)
+            self.player.start(ts, addr)
         elif cmd == 0x292F:
             addr = (self.c.orig_lookup() - self.ib)/2
             if addr != npc:
                 addr = self.fetch(addr)
-                self.mover.start(addr)
+                self.mover.start(ts, addr)
             else:
                 print "[WARNING] conditional move?"
 
