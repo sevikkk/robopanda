@@ -6,9 +6,13 @@ Put here cartridge files:
 and any trace files:
   trace_*.bin
 
-Use ./decode_spi.sh <basename> [cartridge] for decoding trace file.
+Scripts:
 
+Use ./decode_spi.sh <basename> [cartridge] for decoding trace file.
 Use ./run_emu.sh <basename> [cartridge] for running trace file throught emulator.
+Use ./unbuild.sh <cartridge> for dissecting cartridge file to components.
+Use ./read_trace.sh <basename> for reading binary trace file from SD.
+Use ./write_img.sh <basename> for writin cartridge image to SD.
 
 Examples: 
 
