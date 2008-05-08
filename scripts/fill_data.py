@@ -8,6 +8,8 @@ def main(input, cartridge):
 
     data = open(cartridge,"r").read()
     for a in open(input, "r").readlines():
+        if a[0] == "#":
+            continue
         a = a.split()
         if len(a) < 4:
             raise InputError, "invalid input string: %s" % (`a`)

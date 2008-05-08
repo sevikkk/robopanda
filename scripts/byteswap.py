@@ -2,8 +2,8 @@
 import sys
 import struct
 
-f = open("cartridge.bin","r")
-f2=open("cartridge_swap.bin","w")
+f = open(sys.argv[1],"r")
+f2=open(sys.argv[2],"w")
 while 1:
     d = f.read(4)
     if d == "":
