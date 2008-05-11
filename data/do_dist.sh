@@ -12,5 +12,5 @@ tar cvzf $CDIR/robopanda_hwemu-${VER}.tar.gz robopanda_hwemu
 rm -r $TDIR
 
 cd $CDIR
-tar cvzf $CDIR/robopanda_emu_logs-${VER}.tar.gz standup.log test.log training.log cartridge_black.src cartridge_white.src
+tar cvzf $CDIR/robopanda_emu_logs-${VER}.tar.gz standup.log test.log training.log cartridge_black.src cartridge_white.src dump_cartridge_black dump_cartridge_white
 scp robopanda_hwemu-${VER}.tar.gz robopanda_tools-${VER}.tar.gz robopanda_emu_logs-${VER}.tar.gz host:/home/www/sites.local/sevik/files_global/robopanda/
