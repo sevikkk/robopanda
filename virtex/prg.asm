@@ -89,6 +89,46 @@ main_loop:
 	skip !'r'
 	jump $do_r
 
+	skip !'d'
+	jump $do_d
+
+	skip !'0'
+	jump $do_digit
+	skip !'1'
+	jump $do_digit
+	skip !'2'
+	jump $do_digit
+	skip !'3'
+	jump $do_digit
+	skip !'4'
+	jump $do_digit
+	skip !'5'
+	jump $do_digit
+	skip !'6'
+	jump $do_digit
+	skip !'7'
+	jump $do_digit
+	skip !'8'
+	jump $do_digit
+	skip !'9'
+	jump $do_digit
+
+	skip !'A'
+	jump $do_hex
+	skip !'B'
+	jump $do_hex
+	skip !'C'
+	jump $do_hex
+	skip !'D'
+	jump $do_hex
+	skip !'E'
+	jump $do_hex
+	skip !'F'
+	jump $do_hex
+
+	skip !'Z'
+	jump $do_zero
+
         writeuart "Error!"
 	jump $main_loop
 
@@ -163,6 +203,7 @@ sd_write:
 write_ok:
 	jump $write_ok,!tx_empty
 	writeuart "W"
+        jump $write_abort,rx_rdy
 	read r2
 	addl #1
 	write r2
@@ -175,11 +216,17 @@ write_ok:
 	jump $sector_loop
 
         writeuart "\r\ndone          \r\n"
+        jump $main_loop
 
+$write_abort:	
+	read uart
+        writeuart "\r\naborted          \r\n"
         jump $main_loop
 
 do_i:
         writeuart "Init SDCard..."
+	read #0
+	writewb @5 // TRANS_ERROR_REG
 	read #1
 	writewb @2 // SPI_TRANS_TYPE_REG = SPI_INIT_SD
 	writewb @3 // SPI_TRANS_CTRL_REG = SPI_TRANS_START
@@ -273,6 +320,7 @@ cr_read_loop:
 	writedram @idx2+
 	loop $cr_read_loop
 
+        jump $read_abort,rx_rdy
         read r2
         addl #1
         write r2
@@ -285,3 +333,86 @@ cr_read_loop:
         jump $cr_loop
         writeuart " done        \r\n"
 	jump $main_loop
+
+read_abort:	
+	read uart
+        writeuart "\r\naborted          \r\n"
+        jump $main_loop
+
+do_zero:
+	read #0
+	write r2
+	jump $disp_digit
+
+do_hex:
+	subl #'A'
+	addl #10
+	jump $do_digit1
+
+do_digit:
+	subl #'0'
+do_digit1:
+	write r0
+	read r2
+	shift left1
+	shift left1
+	shift left1
+	shift left1
+	add r0
+	write r2
+	jump $disp_digit
+
+disp_digit:
+	writeuart acc,hex4
+	writeuart "\r\n"
+        jump $main_loop
+
+do_d:
+	read r2
+	write idx
+	read #32
+	write cnt
+
+d_loop:
+	jump $d_loop,!tx_empty
+	read idx
+	writeuart acc,hex4
+	writeuart ":  "
+
+	readdram @idx+
+	writeuart acc,hex4
+	writeuart " "
+
+	readdram @idx+
+	writeuart acc,hex4
+	writeuart " "
+
+	readdram @idx+
+	writeuart acc,hex4
+	writeuart " "
+
+	readdram @idx+
+	writeuart acc,hex4
+	writeuart " "
+
+	readdram @idx+
+	writeuart acc,hex4
+	writeuart " "
+
+	readdram @idx+
+	writeuart acc,hex4
+	writeuart " "
+
+	readdram @idx+
+	writeuart acc,hex4
+	writeuart " "
+
+	readdram @idx+
+	writeuart acc,hex4
+	writeuart "\r\n"
+	loop $d_loop
+
+	read idx
+	write r2
+
+        jump $main_loop
