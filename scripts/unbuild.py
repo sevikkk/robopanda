@@ -35,13 +35,13 @@ def main(fn):
     index_base = struct.unpack('<H',data[2:4])[0]
     mover_scripts_end = struct.unpack('<H',data[index_base+2:index_base+4])[0]
     mover_scripts = struct.unpack('<H',data[index_base+4:index_base+6])[0]
-    mover_scripts = mover_scripts * 2 + index_base
-    mover_scripts_num = struct.unpack('<H',data[mover_scripts-2:mover_scripts])[0]
+    mover_scripts_spi = mover_scripts * 2 + index_base
+    mover_scripts_num = struct.unpack('<H',data[mover_scripts_spi-2:mover_scripts_spi])[0]
     cx_offset = struct.unpack('<H',data[index_base+6:index_base+8])[0]
     addrs = {}
     aliases = {}
     for i in range(mover_scripts_num):
-        addr = struct.unpack('<H',data[mover_scripts+i*2:mover_scripts+i*2+2])[0]
+        addr = struct.unpack('<H',data[mover_scripts_spi+i*2:mover_scripts_spi+i*2+2])[0]
         if addr in addrs:
             if not addr in aliases:
                 aliases[addr] = []
@@ -125,7 +125,7 @@ def main(fn):
 
     print "=================== Code ======================="
     addr = 0x3C
-    while addr < 0x6473:
+    while addr < mover_scripts-1:
 
         spi_addr = addr*2+index_base
 
