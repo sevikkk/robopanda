@@ -74,7 +74,7 @@ class Ram:
             args = []
         else: # 2
             cmd, arg = s
-            args = arg.lower().strip()
+            args = arg.strip()
             args = args.split()
             args = "".join(args).split(",")
 
