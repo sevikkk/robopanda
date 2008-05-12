@@ -19,6 +19,7 @@ def main(config, result):
 
     for line in cfg:
         line = line[:-1]
+        line = line.split("#")[0]
         line = line.split()
         if not line:
             continue
