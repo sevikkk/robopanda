@@ -54,8 +54,8 @@ def main(config, result):
                 mover.append(c)
 
     data = StringIO.StringIO()
-    data.seek(8*1024*1024-1)
-    data.write('\x00')
+    #data.seek(8*1024*1024-1)
+    #data.write('\x00')
     data.seek(0)
     data.write('\xCC\xBB')
     data.write(struct.pack("<H",index))

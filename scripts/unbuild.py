@@ -153,7 +153,7 @@ def main(fn):
 
     print "=================== Code ======================="
     for pass_num in (1,2):
-        addr = 0x3C
+        addr = 0x20
         barriers[addr] = 1
         while addr < mover_scripts-1:
 
