@@ -264,7 +264,7 @@ class CPU:
             self.stack += args  # push args
 
             npc = addr + self.cx_off
-            print "%9.3f %06X [CPU] %06X: call %04X" % (ts, real_addr, pc, npc)
+            print "%9.3f %06X [CPU] %06X: call %04X // stack: %s" % (ts, real_addr, pc, npc, self.dump_stack())
         elif cmd & 0xFC00 == 0xA800:
             reg = (cmd >> 6) & 0xF
             value = cmd & 0x3F
@@ -277,6 +277,12 @@ class CPU:
                 npc = pc + 2
             self.stack.append(arg)
             print "%9.3f %06X [CPU] %06X: push #%04X // stack: %s" % (ts, real_addr, pc, arg, self.dump_stack())
+        elif cmd & 0xFFF0 == 0x2EC0:
+            arg = cmd & 0xF
+            old = self.locals[arg + self.locals_offset]
+            self.locals[arg + self.locals_offset] = old + 1
+            self.stack.append(old)
+            print "%9.3f %06X [CPU] %06X: inc $%X // $%X = %04X, stack: %s" % (ts, real_addr, pc, arg, arg, old+1, self.dump_stack())
         elif cmd & 0xFF80 == 0x2D80:
             arg = cmd & 0x7F
             value = self.stack.pop()
@@ -339,6 +345,9 @@ class CPU:
             self.stack.append(arg)
             self.stack.append(0)
             print "%9.3f %06X [CPU] %06X: extend // stack: %s" % (ts, real_addr, pc, self.dump_stack())
+        elif cmd == 0x297E:
+            arg = self.stack.pop()
+            print "%9.3f %06X [CPU] %06X: drop // stack: %s" % (ts, real_addr, pc, self.dump_stack())
         elif cmd == 0x2928:
             addr = self.c.orig_lookup()
             a1,a2,a3,a4 = self.c.read(addr,4)
@@ -378,7 +387,7 @@ class CPU:
 
                 npc += 1
                 
-            print "%9.3f %06X [CPU] %06X: return_f0" % (ts, real_addr, pc)
+            print "%9.3f %06X [CPU] %06X: %s // stack: %s" % (ts, real_addr, pc, cmd, self.dump_stack())
         elif (cmd & 0xF000) == 0xB000:
             offset = cmd & 0xFFF
             if offset == 0xFFF:
@@ -407,7 +416,7 @@ class CPU:
             print "%9.3f %06X [CPU] %06X: pop2 @%02X // @%X,@%X = %04X,%04X, stack: %s" % (ts, real_addr, pc, arg, arg, arg + 1, value1, value2, self.dump_stack())
         elif (cmd & 0xFF00) == 0x2000:
             arg = cmd & 0xFF
-            value = self.globals.get(arg)
+            value = self.globals.get(arg, 0)
             self.stack.append(value)
             print "%9.3f %06X [CPU] %06X: push @%02X // stack: %s" % (ts, real_addr, pc, arg, self.dump_stack())
         elif cmd == 0x0002:
