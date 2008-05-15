@@ -185,7 +185,7 @@ class Mover:
                 arg = self.fetch(self.pc)
                 self.stack.append(self.pc + 1)
                 self.pc = arg
-                cmd_txt = "call %06X" % (arg,)
+                cmd_txt = "call %06X // stack: %s" % (arg,self.dump_stack())
             elif cmd == 0xF00A:
                 if self.stack:
                     self.pc = self.stack.pop()
@@ -209,9 +209,21 @@ class CPU:
         self.mover = mover
         self.player = player
         self.alt_branch = None
+        self.globals = {}
+        self.locals = {}
+        self.locals_offset = 0
 
     def fetch(self, pc):
         return self.c.read_int16(pc * 2 + self.ib)
+
+    def dump_stack(self):
+        s = []
+        st = self.stack[:]
+        st.reverse()
+        for a in st:
+            s.append("%04X" % a)
+
+        return "[" + ",".join(s) + "]"
 
     def do_one_cmd(self, ts, real_addr):
         real_pc = (real_addr - self.ib)/2
@@ -230,26 +242,50 @@ class CPU:
 
         cmd = self.fetch(pc)
 
-        if cmd & 0xF000 == 0xC000:
-            self.stack.append(npc)
-            read_ahead = self.fetch(npc)
-            npc = (cmd & 0xFFF) + self.cx_off
-            print "%9.3f %06X [CPU] %06X: call_0p %06X" % (ts, real_addr, pc, npc)
-        elif cmd  == 0xDFFF:
-            addr = self.fetch(pc + 1)
-            self.stack.append(pc + 2)
-            read_ahead = self.fetch(pc + 2)
+        if cmd & 0xE000 == 0xC000:
+            addr = cmd &0x1FFF
+            if addr == 0x1FFF:
+                addr = self.fetch(pc + 1)
+                npc += 1
+
+            ret = npc
+
+
+            mods = self.fetch(npc)
+            nargs = mods >> 8
+            nlocals = mods & 0xff
+
+            self.locals_offset += nlocals # save locals
+
+            args = self.stack[:nargs] # pop args
+            self.stack = self.stack[nargs:]
+
+            self.stack.append(ret + self.ib/2) # push return address
+            self.stack += args  # push args
+
             npc = addr + self.cx_off
-            print "%9.3f %06X [CPU] %06X: call %06X" % (ts, real_addr, pc, npc)
-        elif cmd & 0xF000 == 0xD000:
-            self.stack.append(npc)
-            read_ahead = self.fetch(npc)
-            npc = (cmd & 0xFFF) + self.cx_off + 0x1000
-            print "%9.3f %06X [CPU] %06X: call_1p %06X" % (ts, real_addr, pc, npc)
-        elif cmd  == 0x01FF:
-            arg = self.fetch(pc + 1)
-            npc = pc + 2
-            print "%9.3f %06X [CPU] %06X: unknown 4byte %04X %04X" % (ts, real_addr, pc, cmd, arg)
+            print "%9.3f %06X [CPU] %06X: call %04X" % (ts, real_addr, pc, npc)
+        elif cmd & 0xFC00 == 0xA800:
+            reg = (cmd >> 6) & 0xF
+            value = cmd & 0x3F
+            self.locals[reg + self.locals_offset] = value
+            print "%9.3f %06X [CPU] %06X: set $%X, #%02X // $%X = %02X" % (ts, real_addr, pc, reg, value, reg, value)
+        elif cmd & 0xFE00 == 0x0000:
+            arg = cmd & 0x1FF
+            if arg == 0x1FF:
+                arg = self.fetch(pc + 1)
+                npc = pc + 2
+            self.stack.append(arg)
+            print "%9.3f %06X [CPU] %06X: push #%04X // stack: %s" % (ts, real_addr, pc, arg, self.dump_stack())
+        elif cmd & 0xFF80 == 0x2D80:
+            arg = cmd & 0x7F
+            value = self.stack.pop()
+            self.locals[arg + self.locals_offset] = value
+            print "%9.3f %06X [CPU] %06X: pop $%X // $%X = %04X, stack: %s" % (ts, real_addr, pc, arg, arg, value, self.dump_stack())
+        elif cmd & 0xFF80 == 0x2D00:
+            arg = cmd & 0x7F
+            self.stack.append(self.locals.get(arg + self.locals_offset,0))
+            print "%9.3f %06X [CPU] %06X: push $%X // stack: %s" % (ts, real_addr, pc, arg, self.dump_stack())
         elif cmd & 0xF800 in (0xF000,0xE000, 0xE800):
             offset = (cmd & 0x7FF)
 
@@ -298,6 +334,11 @@ class CPU:
 
             print "%9.3f %06X [CPU] %06X: jump_arg %06X %06X" % (ts, real_addr, pc, arg, pc + offset + 2)
 
+        elif cmd == 0x2902:
+            arg = self.stack.pop()
+            self.stack.append(arg)
+            self.stack.append(0)
+            print "%9.3f %06X [CPU] %06X: extend // stack: %s" % (ts, real_addr, pc, self.dump_stack())
         elif cmd == 0x2928:
             addr = self.c.orig_lookup()
             a1,a2,a3,a4 = self.c.read(addr,4)
@@ -313,28 +354,62 @@ class CPU:
                 print "[WARNING] conditional move?"
 
             print "%9.3f %06X [CPU] %06X: move (%06X)" % (ts, real_addr, pc, addr)
-        elif cmd == 0x2978:
-            npc = self.stack.pop()
-            print "%9.3f %06X [CPU] %06X: return" % (ts, real_addr, pc)
-        elif cmd == 0x2979:
+        elif cmd == 0x2979 or cmd == 0x2978:
+            ret = self.stack[-1] - self.ib/2
             addr = (self.c.orig_lookup() - self.ib)/2
-            if addr == self.stack[-1]:
-                flag = 1
+            if cmd == 0x2979:
+                cmd = "return_f0"
+                if addr == ret:
+                    flag = 1
+                else:
+                    flag = 0
             else:
-                flag = 0
+                cmd = "return"
+                flag = 1
+
             if flag:
-                npc = self.stack.pop()
+                npc = self.stack.pop() - self.ib/2
+
+                mods = self.fetch(npc)
+                nargs = mods >> 8
+                nlocals = mods & 0xff
+
+                self.locals_offset -= nlocals # save locals
+
+                npc += 1
+                
             print "%9.3f %06X [CPU] %06X: return_f0" % (ts, real_addr, pc)
-        elif (cmd & 0xf800) == 0xB000:
-            addr = self.c.orig_lookup()
-            self.c.read_int16(addr)
-            print "%9.3f %06X [CPU] %06X: readspi %04X (%06X)" % (ts, real_addr, pc, cmd, addr)
-        elif cmd  == 0xbfff:
-            arg = self.fetch(pc + 1)
-            npc = pc + 2
-            addr = self.c.orig_lookup()
-            self.c.read_int16(addr)
-            print "%9.3f %06X [CPU] %06X: readspi_arg %X (%06X)" % (ts, real_addr, pc, arg, addr)
+        elif (cmd & 0xF000) == 0xB000:
+            offset = cmd & 0xFFF
+            if offset == 0xFFF:
+                offset = self.fetch(pc + 1)
+                npc = pc + 2
+            arg = self.stack.pop()
+            addr = (arg + offset + self.cx_off)*2 + self.ib
+            value = self.c.read_int16(addr)
+            self.stack.append(value)
+            print "%9.3f %06X [CPU] %06X: readspi %04X // stack: %s" % (ts, real_addr, pc, offset, self.dump_stack())
+        elif (cmd & 0xFF00) == 0x0E00:
+            arg = cmd & 0xFF
+            value = self.stack.pop()
+            print "%9.3f %06X [CPU] %06X: cmp #%02X // %04X == %02X?, stack: %s" % (ts, real_addr, pc, arg, value, arg, self.dump_stack())
+        elif (cmd & 0xFF00) == 0x2400:
+            arg = cmd & 0xFF
+            value = self.stack.pop()
+            self.globals[arg] = value
+            print "%9.3f %06X [CPU] %06X: pop @%02X // @%X = %04X, stack: %s" % (ts, real_addr, pc, arg, arg, value, self.dump_stack())
+        elif (cmd & 0xFF00) == 0x2500:
+            arg = cmd & 0xFF
+            value1 = self.stack.pop()
+            value2 = self.stack.pop()
+            self.globals[arg] = value1
+            self.globals[arg+1] = value2
+            print "%9.3f %06X [CPU] %06X: pop2 @%02X // @%X,@%X = %04X,%04X, stack: %s" % (ts, real_addr, pc, arg, arg, arg + 1, value1, value2, self.dump_stack())
+        elif (cmd & 0xFF00) == 0x2000:
+            arg = cmd & 0xFF
+            value = self.globals.get(arg)
+            self.stack.append(value)
+            print "%9.3f %06X [CPU] %06X: push @%02X // stack: %s" % (ts, real_addr, pc, arg, self.dump_stack())
         elif cmd == 0x0002:
             print "%9.3f %06X [CPU] %06X: nop" % (ts, real_addr, pc)
         else:
