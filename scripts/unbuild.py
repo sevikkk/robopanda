@@ -3,9 +3,12 @@
 import struct
 import os
 import bisect
+from cpu import CPU
+from cartridge import Cartridge
 
 def main(fn):
-    data = open(fn,'r').read()
+    cartridge = Cartridge(fn)
+
     try:
         os.mkdir("dump")
     except:
@@ -15,34 +18,32 @@ def main(fn):
     addr = 5
     n = 0
     while 1:
-        a = data[addr:addr+4]
-        a = struct.unpack('<L',a)[0]
+        a = cartridge.read_int32(addr)
         a = a & 0xffffff
 
-        l = data[a:a+4]
-        l = struct.unpack('<L',l)[0]
+        l = cartridge.read_int32(a)
         if l == 0:
             break
-        format = data[a+4:a+6]
-        format = struct.unpack("BB",format)
+
+        format = cartridge.read_int16(a+4)
 
         print "Audio%05d: %06X %d %s" % (n, a, l, format)
         f = open("dump/%05d.aud" % n,"w")
-        f.write(data[a+4:a+l+4])
+        f.write(cartridge.data[a+4:a+l+4])
         f.close()
         addr += 3
         n += 1
 
-    index_base = struct.unpack('<H',data[2:4])[0]
-    mover_scripts_end = struct.unpack('<H',data[index_base+2:index_base+4])[0]
-    mover_scripts = struct.unpack('<H',data[index_base+4:index_base+6])[0]
+    index_base = cartridge.read_int16(2)
+    mover_scripts_end = cartridge.read_int16(index_base+2)
+    mover_scripts = cartridge.read_int16(index_base+4)
     mover_scripts_spi = mover_scripts * 2 + index_base
-    mover_scripts_num = struct.unpack('<H',data[mover_scripts_spi-2:mover_scripts_spi])[0]
-    cx_offset = struct.unpack('<H',data[index_base+6:index_base+8])[0]
+    mover_scripts_num = cartridge.read_int16(mover_scripts_spi - 2)
+    cx_offset = cartridge.read_int16(index_base+6)
     addrs = {}
     aliases = {}
     for i in range(mover_scripts_num):
-        addr = struct.unpack('<H',data[mover_scripts_spi+i*2:mover_scripts_spi+i*2+2])[0]
+        addr = cartridge.read_int16(mover_scripts_spi + i*2)
         if addr in addrs:
             if not addr in aliases:
                 aliases[addr] = []
@@ -71,7 +72,7 @@ def main(fn):
                     print "scr%d:" % a
 
         spi_addr = addr*2+index_base
-        cmd = struct.unpack('<H',data[spi_addr:spi_addr+2])[0]
+        cmd = cartridge.read_int16(spi_addr)
         if (cmd & 0xF000) == 0xF000:
             if cmd == 0xF000:
                 cmd_txt = "done"
@@ -80,17 +81,17 @@ def main(fn):
             elif cmd == 0xF002:
                 cmd_txt = "wait_completion"
             elif cmd == 0xF003:
-                arg = struct.unpack('<H',data[spi_addr+2:spi_addr+4])[0]
+                arg = cartridge.read_int16(spi_addr+2)
                 cmd_txt = "wait_completion_max %d" % arg
                 addr += 1
             elif cmd == 0xF004:
                 cmd_txt = "wait_04"
             elif cmd == 0xF005:
-                arg = struct.unpack('<H',data[spi_addr+2:spi_addr+4])[0]
+                arg = cartridge.read_int16(spi_addr+2)
                 cmd_txt = "wait_completion_max %d" % arg
                 addr += 1
             elif cmd == 0xF006:
-                arg = struct.unpack('<H',data[spi_addr+2:spi_addr+4])[0]
+                arg = cartridge.read_int16(spi_addr+2)
                 if arg in addrs:
                     label = "scr%d" % addrs[arg]
                 else:
@@ -154,165 +155,35 @@ def main(fn):
     print "=================== Code ======================="
     for pass_num in (1,2):
         addr = 0x20
+        cpu = CPU(cartridge, index_base, cx_offset, addr, None, None)
+        cpu.labels = labels
         barriers[addr] = 1
         while addr < mover_scripts-1:
-
-            spi_addr = addr*2+index_base
-
-            cmd = struct.unpack('<H',data[spi_addr:spi_addr+2])[0]
-            arg2 = struct.unpack('<H',data[spi_addr+2:spi_addr+4])[0]
-            arg3 = struct.unpack('<H',data[spi_addr+4:spi_addr+6])[0]
-
-            next_addr = addr + 1
-            cmd_txt = ""
-
-            if cmd & 0xFE00 == 0:
-                arg = cmd & 0x1FF
-                if arg == 0x1FF:
-                    cmd_name = "push2"
-                    arg = arg2
-                    next_addr += 1
-                else:
-                    cmd_name = "push"
-
-                cmd_txt = "%s #%04X" % (cmd_name, arg)
-            elif cmd & 0xFE00 == 0x2000:
-                arg = cmd & 0x1FF
-                if arg == 0x1FF:
-                    cmd_name = "push2"
-                    arg = arg2
-                    next_addr += 1
-                else:
-                    cmd_name = "push"
-
-                add_xref(addr, "globals", arg)
-
-                cmd_txt = "%s @%04X" % (cmd_name, arg)
-            elif cmd & 0xFE00 == 0x2400:
-                arg = cmd & 0x1FF
-                if arg == 0x1FF:
-                    cmd_name = "pop2"
-                    arg = arg2
-                    next_addr += 1
-                else:
-                    cmd_name = "pop"
-
-                add_xref(addr, "globals", arg)
-
-                cmd_txt = "%s @%04X" % (cmd_name, arg)
-            elif cmd & 0xFF80 == 0x2D00:
-                arg = cmd & 0x7F
-                cmd_name = "push"
-                cmd_txt = "%s $%d" % (cmd_name, arg)
-            elif cmd & 0xFF80 == 0x2D80:
-                arg = cmd & 0x7F
-                cmd_name = "pop"
-                cmd_txt = "%s $%d" % (cmd_name, arg)
-            elif cmd & 0xFC00 == 0xA800:
-                arg = cmd & 0x3F
-                reg = (cmd & 0x2C0) >> 6
-                cmd_name = "set"
-                cmd_txt = "%s $%d,%04X" % (cmd_name, reg, arg)
-            elif cmd == 0x2912:
-                cmd_txt = "gpio"
-            elif cmd == 0x291A:
-                cmd_txt = "volume"
-            elif cmd == 0x2923:
-                cmd_txt = "wait_play"
-            elif cmd == 0x2928:
-                cmd_txt = "play"
-            elif cmd == 0x2929:
-                cmd_txt = "nvram_write"
-            elif cmd == 0x297E:
-                cmd_txt = "nvram_status(?)"
-            elif cmd == 0x292A:
-                cmd_txt = "nvram_read"
-            elif cmd == 0x292f:
-                cmd_txt = "move"
-            elif cmd == 0x2978:
-                cmd_txt = "return"
+            spi_addr = addr * 2 + index_base
+            decoded = cpu.decode(addr)
+            if decoded.barrier:
                 barriers[addr+1] = 1
-            elif cmd == 0x2979:
-                cmd_txt = "return_f0"
-            elif cmd & 0xF000 == 0xB000:
-                arg = cmd & 0xfff
-                if arg == 0xFFF:
-                    arg = arg2
-                    cmd_name = "spi_read2"
-                    next_addr += 1
-                else:
-                    cmd_name = "spi_read"
-                cmd_txt = "%s %04X" % (cmd_name, arg)
-            elif cmd & 0xE000 == 0xC000:
-                arg = cmd & 0x1FFF
-                if arg == 0x1FFF:
-                    cmd_name = "call2"
-                    arg = arg2
-                    next_addr += 1
-                    flags = struct.unpack('BB',data[spi_addr+4:spi_addr+6])
-                else:
-                    cmd_name = "call"
-                    flags = struct.unpack('BB',data[spi_addr+2:spi_addr+4])
+            for typ, ref in decoded.xrefs:
+                add_xref(addr,typ, ref)
 
-                next_addr += 1
-                add_xref(addr, "code_global", arg + cx_offset)
-                cmd_txt = "%s %04X(args: %d, save: %d)" % (cmd_name, arg + cx_offset, flags[1], flags[0])
-            elif cmd & 0xE000 == 0xE000:
-                subcmd = (cmd & 0x1800)>>11
-                offset = (cmd & 0x7FF)
-
-                if offset & 0x400 != 0:
-                    offset = offset - 0x801
-
-                arg2_txt = ""
-
-                if subcmd == 0:
-                    cmd_name = "rjump"
-                    barriers[addr+1] = 1
-                elif subcmd == 1:
-                    cmd_name = "rjump_e8"
-                elif subcmd == 2:
-                    cmd_name = "rjump_f0"
-                elif subcmd == 3:
-                    cmd_name = "rjump_arg"
-                    arg2_txt = ",%04X" % arg2
-                    next_addr += 1
-
-                arg = addr + offset + 1
-
-                add_xref(addr, "code_local", arg)
-                if arg in labels:
-                    arg = labels[arg]
-                else:
-                    arg = "%04X" % arg
-
-                cmd_txt = "%s %s%s" % (cmd_name, arg, arg2_txt)
-
-            hex = "%04X" % cmd
-
-            if next_addr > addr + 1:
-                hex += " %04X" % arg2
-            else:
-                hex += "     "
-
-            if next_addr > addr + 2:
-                hex += " %04X" % arg3
-            else:
-                hex += "     "
-
-            if not cmd_txt:
-                cmd_txt = "unknown %04X" % cmd
+            hex = []
+            for i in range(decoded.cmd_len):
+                hex.append("%04X" % cartridge.read_int16(spi_addr + i * 2))
+            hex = " ".join(hex)
 
             if pass_num == 2:
                 if addr in barriers_list:
-                    print "-----------------------------------------"
+                    print "//------------------------------------------------------------------"
                 if addr in xrefs_code_global:
                     print "// global entry, xrefs: ",",".join(["%04X"%d for d in xrefs_code_global[addr]])
+                if addr in xrefs_data:
+                    print "// data entry, xrefs: ",",".join(["%04X"%d for d in xrefs_data[addr]])
                 if addr in labels:
-                    print "%s: // xrefs: %s" % (labels[addr],",".join(["%04X"%d for d in xrefs_code_local[addr]]))
-                print "%04X: %s %s" % (addr, hex, cmd_txt)
+                    print "     %20s:                                // xrefs: %s" % (labels[addr],",".join(["%04X"%d for d in xrefs_code_local[addr]]))
+                print "%04X: %-20s %-9s %-20s // %s" % (addr, hex, 
+                        decoded.cmd, decoded.args or "", decoded.descr or "")
 
-            addr = next_addr
+            addr += decoded.cmd_len
 
         barriers[addr] = 1
 

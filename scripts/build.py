@@ -96,7 +96,10 @@ def main(config, result):
     data.seek(0x10000)
     n = 1
     aidx = []
-    for al, afn in audio.items():
+    aks = audio.keys()
+    aks.sort()
+    for al in aks:
+        afn = audio[al]
         adata = open(afn,'r').read()
         aidx.append(data.tell())
         data.write(struct.pack("<L", len(adata)+4))
