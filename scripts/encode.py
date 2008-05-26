@@ -28,6 +28,27 @@ def encode(fn,ofn):
     out = open(ofn, "w")
     out.write("\x07\x80")
     frame_num = 0
+    freq_resp = {
+            0:	5000,
+            1:	4920,
+            2:	4715,
+            3:	4469,
+            4:	4141,
+            5:	3785,
+            6:	3416,
+            7:	3047,
+            8:	2590,
+            9:	2360,
+            10:	2049,
+            11:	1765,
+            12:	1503,
+            13:	1267,
+            14:	1057,
+            15:	871
+    }
+    for i in range(16):
+        freq_resp[i] = 5000.0/freq_resp[i]
+
     freq_map = {
              62.5:     62.5,
             125.0:    125.0,
@@ -114,11 +135,17 @@ def encode(fn,ofn):
     print "local_volumes_table", local_volumes
     window = []
     for i in range(frame_len):
-        window.append(math.sin(math.pi*i/frame_len))
+        x = math.pi*(i-frame_len/2)/frame_len*2
+        if x == 0:
+            win = 1
+        else:
+            win = math.sin(x)/x
+        window.append(win)
     print "window", window
 
     data = rdata.readframes(frame_len)
     prev_data = struct.unpack("h"*frame_len, data)
+    super_max = 0
     while 1:
         cur_data = rdata.readframes(frame_len)
 
@@ -139,6 +166,7 @@ def encode(fn,ofn):
 
         freqs = []
         freqs_data = {}
+        freqs_cnt = {}
         for a in fd[1:]:
             p = abs(a)
             g = math.atan2(a.imag,a.real)/math.pi*180
@@ -148,17 +176,24 @@ def encode(fn,ofn):
 
             if not mfreq in freqs_data:
                 freqs_data[mfreq] = 0
-            freqs_data[mfreq] += a
+                freqs_cnt[mfreq] = 0
+
+            freqs_data[mfreq] += abs(a)
+            freqs_cnt[mfreq] += 1
 
             if f >= 4000:
                 break
 
             f += 62.5
 
+        for f in freqs_data.keys():
+            freqs_data[f] = freqs_data[f]/freqs_cnt[f]
 
         if 1:
             freqs.sort(lambda x,y: cmp(y[1],x[1]))
             max_val = freqs[0][1]
+            super_max = max(super_max, max_val)
+
             if max_val>100000:
                 limit = max(10000, max_val / 100)
             else:
@@ -179,7 +214,7 @@ def encode(fn,ofn):
             sb = []
 
             val = freqs_data.get(band*250,0)
-            val = abs(val)/k0
+            val = abs(val)/k0 * freq_resp[band]
             sb.append(val)
 
             volume = 15
@@ -198,14 +233,18 @@ def encode(fn,ofn):
             sb = []
             for sband in (0,3): # 1250 and 1437.5
                 val = freqs_data.get(band*250 + sband*62.5,0)
-                val = abs(val)/k0
+                val = abs(val)/k0 * freq_resp[band]
                 sb.append(val)
 
             if sb[0] < sb[1]: # subband value more than main tone
-                print "band", band, "main tone volume less than subband, remix"
-                sum = (sb[0] + sb[1])/2/1.75
-                sb[0] = sum
-                sb[1] = sum * 0.75
+                if 0:
+                    print "WARN: band", band, "main tone volume less than subband, remix"
+                    sum = (sb[0] + sb[1])/2/1.75
+                    sb[0] = sum
+                    sb[1] = sum * 0.75
+                else:
+                    print "WARN: band", band, "main tone volume less than subband, swap"
+                    sb[0], sb[1] = sb[1], sb[0]
 
             main_volume = 15
             main_volume_k = 1
@@ -233,14 +272,19 @@ def encode(fn,ofn):
 
         for band in (4, 3):
             sb = []
+            max_val = 0
+            max_sub = 0
             for sband in range(4):
                 val = freqs_data.get(band*250 + sband*62.5,0)
-                val = abs(val)/k0
+                val = abs(val)/k0 * freq_resp[band]
                 sb.append(val)
+                if val>max_val:
+                    max_val = val
+                    max_sub = sband
 
-            if sb[0] < max(sb[1:]): # subband value more than main tone
-                print "band", band, "main tone volume less than subband, extending main", sb
-                sb[0] = max(sb[1:])
+            if sb[0] < max_val: # subband value more than main tone
+                print "band", band, "WARN: main tone volume less than subband, swap", sb
+                sb[0], sb[max_sub] = sb[max_sub], sb[0]
 
             main_volume = 15
             main_volume_k = 1
@@ -281,7 +325,7 @@ def encode(fn,ofn):
 
             for sub in range(subs):
                 val = freqs_data.get(band*250 + sub*62.5,0)
-                val = abs(val)/k0
+                val = abs(val)/k0 * freq_resp[band]
                 sb.append(val)
 
                 if val>max_val:
@@ -336,6 +380,7 @@ def encode(fn,ofn):
 
         frame_num += 1
     out.write("\xFF\xFF\x00\x00")
+    print "super_max:", super_max
 
 if __name__ == "__main__":
     encode(sys.argv[1],sys.argv[2])
