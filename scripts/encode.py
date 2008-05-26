@@ -112,14 +112,27 @@ def encode(fn,ofn):
 
     print "main_volumes_table", main_volumes
     print "local_volumes_table", local_volumes
+    window = []
+    for i in range(frame_len):
+        window.append(math.sin(math.pi*i/frame_len))
+    print "window", window
 
+    data = rdata.readframes(frame_len)
+    prev_data = struct.unpack("h"*frame_len, data)
     while 1:
-        data = rdata.readframes(frame_len)
+        cur_data = rdata.readframes(frame_len)
 
-        if len(data) != frame_len*2:
+        if len(cur_data) != frame_len*2:
             break
 
-        data = struct.unpack("h"*frame_len, data)
+        cur_data = struct.unpack("h"*frame_len, cur_data)
+
+        prev_data = cur_data
+        data = list(cur_data)
+
+        for i in range(frame_len):
+            data[i] = data[i] * window[i]
+
 
         fd = FFT.real_fft(data, frame_len).tolist()
         f = 62.5
@@ -158,7 +171,7 @@ def encode(fn,ofn):
 
             print
 
-        k0 = 32768*frame_len/2
+        k0 = 5000000
 
         frame = [0] * 64
 
@@ -311,7 +324,7 @@ def encode(fn,ofn):
                 
                 sub_offset = [1,1,3,5,7][sub] # first 1 - for not overwriting main_offset
 
-                frame[offset+sub_offset] = sub_volume
+                frame[offset+sub_offset] = sub_volume << 1
 
         print frame
 
