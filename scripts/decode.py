@@ -14,7 +14,9 @@ from Numeric import array
 
 class Meta:
 
-    def __init__(self):
+    def __init__(self, frame_len):
+        self.frame_len = frame_len
+
         self.freq_resp = {
             0:	5000,
             1:	4920,
@@ -51,7 +53,15 @@ class Meta:
                 k = k * 0.6
         self.local_volumes.append(0)
 
-meta = Meta()
+        self.filter1 = array([0.0] * frame_len)
+        self.filter2 = array([0.0] * frame_len)
+        for i in range(frame_len):
+            w = float(i)/frame_len
+            self.filter1[i] = w
+            self.filter2[frame_len-i-1] = w
+
+meta = Meta(768)
+
 class SubBand:
     def __init__(self, freq, phase):
         self.freq = freq
@@ -146,7 +156,8 @@ class Band8(Band):
 
         self.base_subband.freq = self.subbands[self.main_subband].freq
         self.base_subband.phase = self.subbands[self.main_subband].phase
-        self.base_subband.inverse = self.inverse
+        if self.main_subband == 0:
+            self.base_subband.inverse = self.inverse
 
     def encode(self, frame):
         frame[band] = self.volume
@@ -280,9 +291,11 @@ class Frame:
 def decode(fn, ofn):
 
     input = open(fn, "r")
-    out = open(ofn, "w")
-
-    meta = Meta()
+    out = wave.open(ofn, "w")
+    out.setnchannels(1)
+    out.setsampwidth(2)
+    out.setframerate(int(meta.frame_len*62.5))
+    out.setcomptype("NONE","not compressed")
 
     print "main_volumes_table", meta.main_volumes
     print "local_volumes_table", meta.local_volumes
@@ -290,13 +303,7 @@ def decode(fn, ofn):
     hdr = input.read(2)
     print "hdr", `hdr`
 
-    filter1 = array([0.0] * 768)
-    filter2 = array([0.0] * 768)
-    prev_result = array([0.0] * 768)
-
-    for i in range(768):
-        filter1[i] = i/768.0
-        filter2[767-i] = i/768.0
+    prev_result = array([0.0] * meta.frame_len)
 
     while 1:
         data = input.read(32)
@@ -316,11 +323,12 @@ def decode(fn, ofn):
         result = frame.generate().tolist()
         print max(result), min(result)
 
-        out_frame = result * filter1 + prev_result * filter2
+        out_frame = result * meta.filter1 + prev_result * meta.filter2
         out_frame = [ int(a) for a in out_frame ]
-        odata = struct.pack('h'*768,*out_frame)
-        out.write(odata)
+        odata = struct.pack('h'*meta.frame_len,*out_frame)
+        out.writeframes(odata)
         prev_result = result
+    out.close()
 
 if __name__ == "__main__":
     decode(sys.argv[1], sys.argv[2])
