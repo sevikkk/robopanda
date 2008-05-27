@@ -104,7 +104,7 @@ class Band:
         return "".join(s)
 
     def encode(self, frame):
-        frame[band] = self.volume
+        frame[self.band] = self.volume
         for i in range(self.num_subs):
             frame[self.frame_offset+i] = self.subbands[i].encode()
 
@@ -160,7 +160,7 @@ class Band8(Band):
             self.base_subband.inverse = self.inverse
 
     def encode(self, frame):
-        frame[band] = self.volume
+        frame[self.band] = self.volume
         frame[self.frame_offset] = self.main_subband | self.inverse <<3
         for i in range(7):
             frame[self.frame_offset+i+1] = self.subbands[i+1].encode()
@@ -269,9 +269,12 @@ class Frame:
         for i in range(16):
             self.bands[i].decode(frame)
 
-    def encode(self, frame):
+    def encode(self):
+        frame = [0]*64
         for i in range(16):
             self.bands[i].encode(frame)
+
+        return frame
 
     def __str__(self):
         s = ["Frame([\n"]
@@ -287,6 +290,25 @@ class Frame:
             band.generate(frame)
         frame *= array([5000.0])
         return frame
+
+    def unpack(self, data):
+        data = struct.unpack("B"*32, data)
+        fdata = []
+        for b in data:
+            fdata.append(b & 0xf)
+            fdata.append((b>>4)&0xf)
+
+        return fdata
+
+    def pack(self, data):
+        ndata = []
+        for i in range(32):
+            val = data[i*2]|(data[i*2+1]<<4)
+            ndata.append(val)
+
+        ndata = struct.pack("B"*32, *ndata)
+
+        return ndata
 
 def decode(fn, ofn):
 
@@ -311,14 +333,15 @@ def decode(fn, ofn):
             print "foot", `data`
             break
 
-        data = struct.unpack("B"*32, data)
-        fdata = []
-        for b in data:
-            fdata.append(b & 0xf)
-            fdata.append((b>>4)&0xf)
-
         frame = Frame()
+        fdata = frame.unpack(data)
         frame.decode(fdata)
+        if 0:
+            edata = frame.encode()
+            assert fdata == edata
+            edata2 = frame.pack(edata)
+            assert data == edata2
+
         print frame
         result = frame.generate().tolist()
         print max(result), min(result)
