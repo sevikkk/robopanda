@@ -3,8 +3,6 @@
 import sys
 import random
 
-from decode import Frame
-
 def pack(data):
     return [int(a,16) for a in data.split()]
 
