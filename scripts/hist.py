@@ -16,7 +16,7 @@ def main(fn):
         hist[i] = [0,0]
 
     for f in fn:
-        data = open(f,'r').read()
+        data = open(f,'rb').read()
         print f,ord(data[0]), ord(data[1])
         out_hdr = data[:2]
         out_foot = data[-4:]
@@ -47,7 +47,7 @@ def main(fn):
                         hist[i*8 + ii][0] += 1
 
                     cc = cc<<1;
-        of = open("out.aud","w")
+        of = open("out.aud","wb")
         of.write(out_hdr)
 
         out_data = out_data[1:]

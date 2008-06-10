@@ -2,8 +2,8 @@
 import sys
 import struct
 
-f = open(sys.argv[1],"r")
-f2=open(sys.argv[2],"w")
+f = open(sys.argv[1],"rb")
+f2=open(sys.argv[2],"wb")
 while 1:
     d = f.read(4)
     if d == "":

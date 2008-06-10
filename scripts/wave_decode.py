@@ -47,7 +47,7 @@ class Logger:
 
 def main():
     fn = sys.argv[1]
-    f = open(fn,"r")
+    f = open(fn,"rb")
     d = f.read(5120)
 
     log = Logger()

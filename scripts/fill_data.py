@@ -6,7 +6,7 @@ class InputError(Exception):
 
 def main(input, cartridge):
 
-    data = open(cartridge,"r").read()
+    data = open(cartridge,"rb").read()
     for a in open(input, "r").readlines():
         if a[0] == "#":
             continue

@@ -7,7 +7,7 @@ class EmulationError(Exception):
 
 class Cartridge:
     def __init__(self, contents, logfile):
-        self.data = open(contents,'r').read()
+        self.data = open(contents,'rb').read()
         self.last_addr = None;
         self.log = []
         self.origlog = []

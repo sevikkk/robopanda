@@ -1,6 +1,6 @@
 #!/usr/local/bin/python
 
-import FFT
+from numpy.fft import rfft
 import struct
 import sys
 import wave
@@ -58,7 +58,7 @@ def tune(fn, start, end, shift = 0, corr = 0):
         data = struct.unpack("h"*frame_len, data)
         data = [ -a for a in data ]
 
-        fd = FFT.real_fft(data, frame_len).tolist()
+        fd = rfft(data, frame_len).tolist()
         f = 62.5
         print "%6d: "% (frame_num,),
         power_500 = 0
@@ -165,7 +165,7 @@ def analyze(fn, corr = 0.8, shift = 4, frames = None, resync = None, big_resync 
         data = struct.unpack("h"*frame_len, data)
         data = [ -a for a in data ]
 
-        fd = FFT.real_fft(data, frame_len).tolist()
+        fd = rfft(data, frame_len).tolist()
         f = 62.5
         do_print = 0
 

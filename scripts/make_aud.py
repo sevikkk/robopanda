@@ -12,6 +12,8 @@ def pack2(data):
 hdr = pack2(pack("07 80"))
 foot = pack2(pack("FF FF 00 00"))
 
+out = open("out.aud","wb")
+
 '''
 silence = pack("""
 00 00 00 00 00 00 00 00 #main band volumes
@@ -378,18 +380,18 @@ if 0:
 
     data += silence.pack() * 4 + end_marker.pack() + silence.pack() * 4
 
-    sys.stdout.write(hdr)
-    sys.stdout.write(data)
-    sys.stdout.write(foot)
+    out.write(hdr)
+    out.write(data)
+    out.write(foot)
     sys.exit(0)
 
 #test_00837_slow
 if 1:
     from decode import Frame
 
-    f = open('dump_cartridge_black/00837.aud', 'r')
+    f = open('dump_cartridge_black/00837.aud', 'rb')
     f.read(2)
-    sys.stdout.write(hdr)
+    out.write(hdr)
 
     for i in range(40):
         orig_data = f.read(32)
@@ -400,14 +402,14 @@ if 1:
             frame = Frame()
             for j in range(b+1):
                 frame.bands[j] = orig_frame.bands[j]
-            sys.stdout.write(orig_frame.pack()*10)
-            sys.stdout.write(frame.pack()*10)
+            out.write(orig_frame.pack()*10)
+            out.write(frame.pack()*10)
 
-    sys.stdout.write(foot)
+    out.write(foot)
     sys.exit(0)
         
 silence = pack("00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00")
 data += silence*10 + frame1 + silence*10
 data = hdr + pack2(data) + foot
 
-sys.stdout.write(data)
+out.write(data)

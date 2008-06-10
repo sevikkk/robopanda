@@ -100,7 +100,7 @@ def main(config, result):
     aks.sort()
     for al in aks:
         afn = audio[al]
-        adata = open(afn,'r').read()
+        adata = open(afn,'rb').read()
         aidx.append(data.tell())
         data.write(struct.pack("<L", len(adata)+4))
         data.write(adata)
@@ -114,7 +114,7 @@ def main(config, result):
 
     data.seek(0)
 
-    open(result,"w").write(data.read())
+    open(result,"wb").write(data.read())
 
 if __name__ == "__main__":
     import sys

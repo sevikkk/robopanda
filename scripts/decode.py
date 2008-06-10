@@ -4,13 +4,11 @@
  sox -V 02\ -\ Winnie-the-Pooh\ -\ Introduction.mp3 -c 1 -s -w test_encode_input.wav trim 0 60 stat
 """
 
-import FFT
 import struct
 import sys
 import wave
 import math
-from Numeric import array
-
+from numpy import array
 
 class Meta:
 
@@ -333,7 +331,7 @@ class Frame:
 
 def decode(fn, ofn, start, num):
 
-    input = open(fn, "r")
+    input = open(fn, "rb")
     out = wave.open(ofn, "w")
     out.setnchannels(1)
     out.setsampwidth(2)

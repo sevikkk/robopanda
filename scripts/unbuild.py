@@ -28,7 +28,7 @@ def main(fn):
         format = cartridge.read_int16(a+4)
 
         print "Audio%05d: %06X %d %s" % (n, a, l, format)
-        f = open("dump/%05d.aud" % n,"w")
+        f = open("dump/%05d.aud" % n,"wb")
         f.write(cartridge.data[a+4:a+l+4])
         f.close()
         addr += 3

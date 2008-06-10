@@ -4,7 +4,7 @@
  sox -V 02\ -\ Winnie-the-Pooh\ -\ Introduction.mp3 -c 1 -s -w test_encode_input.wav trim 0 60 stat
 """
 
-import FFT
+from numpy.fft import rfft
 import struct
 import sys
 import wave
@@ -25,7 +25,7 @@ def encode(fn,ofn):
     frame_len = int(rate * 0.016)
     print "using %d samples per frame" % frame_len
 
-    out = open(ofn, "w")
+    out = open(ofn, "wb")
     out.write("\x07\x80")
     frame_num = 0
     freq_resp = {
@@ -161,7 +161,7 @@ def encode(fn,ofn):
             data[i] = data[i] * window[i]
 
 
-        fd = FFT.real_fft(data, frame_len).tolist()
+        fd = rfft(data, frame_len).tolist()
         f = 62.5
 
         freqs = []
