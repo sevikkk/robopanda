@@ -113,7 +113,7 @@ def analyze(fn, corr = 0.8, shift = 4, frames = None, resync = None, big_resync 
 
     if frames:
         frames.sort()
-        last_frame = frames[-1]
+        last_frame = frames[-1] + 1
     else:
         last_frame = -1
 
@@ -153,6 +153,7 @@ def analyze(fn, corr = 0.8, shift = 4, frames = None, resync = None, big_resync 
             new_pos = rdata.tell()
             #print "shifted %d samples backward (%d -> %d)" % (ns, old_pos, new_pos)
 
+        cur_pos = rdata.tell()
         data = rdata.readframes(frame_len)
 
         if len(data) != frame_len*2:
@@ -168,13 +169,14 @@ def analyze(fn, corr = 0.8, shift = 4, frames = None, resync = None, big_resync 
         f = 62.5
         do_print = 0
 
-        if frame_num % 31 == 25:
-            if descr:
+        if frame_num>20 and (frame_num % 19) == 6:
+            if descr and descr_num < len(descr):
                 print descr[descr_num][:-1]
                 descr_num += 1
 
         if (not frames) or (frame_num in frames):
             do_print = 1
+            #print "%6d(%.5f): "% (frame_num,cur_pos/48000.0),
             print "%6d: "% (frame_num,),
 
         power_500 = 0
@@ -182,13 +184,20 @@ def analyze(fn, corr = 0.8, shift = 4, frames = None, resync = None, big_resync 
         for a in fd[1:]:
             p = abs(a)
             g = math.atan2(a.imag,a.real)/math.pi*180
-            pc = phase_corr.get(f,0)
+            #pc = phase_corr.get(f,0)
+            orig_p = p
+            p = int(p/200000 + 0.5)*200000
+            orig_g = g
+            g = (int((g+360)/45 + 0.5)*45) % 360
+            if g>180:
+                g -= 360
+
             if do_print and (p>200000):
-                print "%8.3f: %7d %4d"% (f,p,g + pc),
+                print "%8.3f: %7d %4d"% (f,p,g),
 
             if f == 500:
-                power_500 = p
-                phase_500 = g
+                power_500 = orig_p
+                phase_500 = orig_g
 
             f += 62.5
             if f >= 4000:
@@ -207,7 +216,7 @@ def analyze(fn, corr = 0.8, shift = 4, frames = None, resync = None, big_resync 
                     corr_sum = -ns
                 else:
                     if abs(ns)<5:
-                        print "resync", -ns, "instead of", corr_sum, "error", (corr_sum + ns)/(frame_num - last_resync), "frame", frame_num
+                        #print "resync", -ns, "instead of", corr_sum, "error", (corr_sum + ns)/(frame_num - last_resync), "frame", frame_num
                         corr -= (corr_sum + ns)/(frame_num - last_resync)
 
                         last_resync = frame_num
@@ -223,34 +232,30 @@ def analyze(fn, corr = 0.8, shift = 4, frames = None, resync = None, big_resync 
 
 
 if __name__ == "__main__":
-    shift = 185
-    corr = 0.923008431476
+    shift = 582
+    corr = 0.938198046099
+
+    shift = 768*6
+    corr = 0
     if 0:
         # find corr and initial value of shift
-        tune(sys.argv[1], 13, 19, shift, corr)
+        tune(sys.argv[1], 8, 12, shift, corr)
     if 0:
         # find corrected value of shift for 562.5Hz align
-        for shift2 in range(10):
+        for shift2 in range(768):
             print "shift", shift + shift2*96
-            analyze(sys.argv[1], shift = shift+shift2*96, corr = corr, frames = range(13,19))
+            analyze(sys.argv[1], shift = shift+shift2*96, corr = corr, frames = [0,1,2,3,4,5,6,7,8,9,10,11])
     if 0:
         # fing final value of shift
         for shift2 in range(-3, 4):
             print "shift", shift + shift2
-            analyze(sys.argv[1], shift = shift+shift2, corr = corr, frames = range(13,19))
+            analyze(sys.argv[1], shift = shift+shift2, corr = corr, frames = range(9,16))
     if 1:
         #full decode for determining of resync and data frames
         analyze(sys.argv[1], shift = shift, corr = corr,
-                resync = [13 + n*31 for n in range(20000)] + [4633],
-                big_resync = {
-                    1036: 1, 
-                    1253: 4, 
-                    4632: 5+16, 4633: 0,
-                    4663: 1,
-                    4756: 4,
-                },
-                descr = sys.argv[2]
-                )
+                resync = [18 + n*19 for n in range(20000)],
+                frames = [25 + n*19 for n in range(20000)],
+                descr = sys.argv[2])
     if 0:
         #decode only needed frames
         analyze(sys.argv[1], shift = shift, corr = corr, 

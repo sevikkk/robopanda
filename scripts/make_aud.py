@@ -241,7 +241,7 @@ if 0:
             data += silence
 
 #test_all_subbands_freqs
-if 1:
+if 0:
     silence = [0] * 64 # nibbles
     carrier_frame = silence[:]
     carrier_frame[2] = 14 # main tone volume 14
@@ -333,6 +333,79 @@ if 1:
 
     data += ndata
 
+#test_band8_interactions
+if 0:
+    from decode import Frame
+    
+    silence = Frame()
+
+    start_marker = Frame()
+    start_marker.bands[10].volume=14
+
+    end_marker = Frame()
+    end_marker.bands[8].volume=14
+
+    start_frame = Frame()
+    start_frame.bands[2].volume=14
+    start_frame.bands[2].subbands[1].volume=7
+
+    end_frame = Frame()
+    end_frame.bands[2].volume=14
+    end_frame.bands[2].subbands[3].volume=7
+
+    data = silence.pack() * 5 + start_marker.pack()*3 + silence.pack() * 4
+    data += start_frame.pack()*5 + silence.pack() * 4
+
+    frame_num = 0
+    for main_subband in range(8):
+        for main_inverse in [0,1]:
+            for subband in range(7):
+                for subband_inverse in [0,1]:
+                    frame = Frame()
+                    frame.bands[1].volume = 14
+                    frame.bands[1].main_subband = main_subband
+                    frame.bands[1].inverse = main_inverse
+                    frame.bands[1].subbands[subband+1].volume = 7
+                    frame.bands[1].subbands[subband+1].inverse = subband_inverse
+                    frame.bands[2].volume = 14
+                    frame.bands[2].main_subband = 3
+                    sys.stderr.write("FRAME: %d: main_subband %d main_inverse %d subband %d subband_inverse %d\n" % 
+                            (frame_num, main_subband, main_inverse, subband + 1, subband_inverse))
+                    frame_num += 1
+
+                    data += start_frame.pack()*5 + frame.pack()*10 + silence.pack()*4
+                    #data += frame.pack() * 10
+
+    data += silence.pack() * 4 + end_marker.pack() + silence.pack() * 4
+
+    sys.stdout.write(hdr)
+    sys.stdout.write(data)
+    sys.stdout.write(foot)
+    sys.exit(0)
+
+#test_00837_slow
+if 1:
+    from decode import Frame
+
+    f = open('dump_cartridge_black/00837.aud', 'r')
+    f.read(2)
+    sys.stdout.write(hdr)
+
+    for i in range(40):
+        orig_data = f.read(32)
+    
+        orig_frame = Frame()
+        orig_frame.decode(orig_frame.unpack(orig_data))
+        for b in range(16):
+            frame = Frame()
+            for j in range(b+1):
+                frame.bands[j] = orig_frame.bands[j]
+            sys.stdout.write(orig_frame.pack()*10)
+            sys.stdout.write(frame.pack()*10)
+
+    sys.stdout.write(foot)
+    sys.exit(0)
+        
 silence = pack("00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00")
 data += silence*10 + frame1 + silence*10
 data = hdr + pack2(data) + foot

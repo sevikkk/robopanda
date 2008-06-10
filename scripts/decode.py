@@ -82,22 +82,25 @@ class SubBand:
                 self.freq, self.phase, self.volume,  self.inverse)
 
     def generate(self, frame):
-        fi = self.phase/180*math.pi
+        fi = self.phase*math.pi/180
         delta_fi = self.freq*2*math.pi*0.016/len(frame)
 
         k = meta.local_volumes[8 - self.volume]
         if self.inverse:
             k = -k
 
+        k = -k # robopanda output is inverted
+
         for i in range(len(frame)):
-            x = math.sin(fi) * k
+            x = math.cos(fi) * k
             frame[i] += x
             fi += delta_fi
 
 class Band:
     def str_subs(self):
         s = []
-        s.append("\t"+str(self.base_subband)+"\n")
+        if self.base_subband:
+            s.append("\t"+str(self.base_subband)+"\n")
         for i in range(self.num_subs):
             s.append("\t"+str(self.subbands[i])+"\n")
         s.append("]")
@@ -117,7 +120,8 @@ class Band:
         band_frame = array([0.0] * len(frame))
         for i in range(self.num_subs):
             self.subbands[i].generate(band_frame)
-        self.base_subband.generate(band_frame)
+        if self.base_subband:
+            self.base_subband.generate(band_frame)
         frame += band_frame * array([meta.main_volumes[15-self.volume]*meta.freq_resp[self.band]/5000.0])
 
 class Band8(Band):
@@ -129,22 +133,21 @@ class Band8(Band):
 
         self.subbands = []
         for freq, phase in [
-                (0,   0),
-                (1,   0),
-                (1, -90),
-                (2, -90),
-                (2, 180),
-                (3, 180),
-                (3,  90),
-                (4,  90),
+                (0,   0), #0    500.0
+                (1, 180), #1    562.5
+                (1,  90), #2    562.5
+                (2, -90), #3    625.0
+                (2, 180), #4    625.0
+                (3,   0), #5    687.5
+                (3, -90), #6    687.5
+                (4,  90), #7    750.0
             ]:
             self.subbands.append(SubBand(self.base_freq + 62.5 * freq, phase))
-        self.base_subband = SubBand(self.base_freq, 0)
-        self.base_subband.volume=8
+        self.base_subband = None
 
-        self.volume = None
-        self.main_subband = None
-        self.inverse = None
+        self.volume = 0
+        self.main_subband = 0
+        self.inverse = 0
 
     def decode(self, frame):
         self.volume = frame[self.band]
@@ -154,14 +157,29 @@ class Band8(Band):
         for i in range(7):
             self.subbands[i+1].decode(frame[self.frame_offset+i+1])
 
-        self.base_subband.freq = self.subbands[self.main_subband].freq
-        self.base_subband.phase = self.subbands[self.main_subband].phase
-        if self.main_subband == 0:
-            self.base_subband.inverse = self.inverse
+    def generate(self,frame):
+        self.subbands[0].inverse = self.inverse
+        save = {}
+        for i in range(self.main_subband):
+            self.subbands[i].volume = self.subbands[i+1].volume
+            self.subbands[i].inverse = self.subbands[i+1].inverse
+            save[i+1] = (self.subbands[i+1].volume, self.subbands[i+1].inverse)
+
+        self.subbands[self.main_subband].volume = 8
+        self.subbands[self.main_subband].inverse = self.inverse
+
+        Band.generate(self, frame)
+
+        for i in range(self.main_subband):
+            self.subbands[i+1].volume = save[i+1][0]
+            self.subbands[i+1].inverse = save[i+1][1]
+
+        self.subbands[0].volume = 0
+        self.subbands[0].inverse = 0
 
     def encode(self, frame):
         frame[self.band] = self.volume
-        frame[self.frame_offset] = self.main_subband | self.inverse <<3
+        frame[self.frame_offset] = self.main_subband | (self.inverse << 3)
         for i in range(7):
             frame[self.frame_offset+i+1] = self.subbands[i+1].encode()
 
@@ -181,18 +199,18 @@ class Band6(Band):
 
         self.subbands = []
         for freq, phase in [
-                (1, -90),
+                (1,  90),
                 (2, -90),
                 (2, 180),
-                (3, 180),
-                (3,  90),
+                (3,   0),
+                (3, -90),
                 (4,  90),
             ]:
             self.subbands.append(SubBand(self.base_freq + 62.5 * freq, phase))
         self.base_subband = SubBand(self.base_freq, 0)
         self.base_subband.volume=8
 
-        self.volume = None
+        self.volume = 0
 
     def __str__(self):
         s = ["Band6(band = %d, freq=%.1f, volume=%d, [\n" % (self.band, self.base_freq, self.volume)]
@@ -208,14 +226,14 @@ class Band2(Band):
 
         self.subbands = []
         for freq, phase in [
-                (3,  90),
+                (3,  -90),
                 (4,  90),
             ]:
             self.subbands.append(SubBand(self.base_freq + 62.5 * freq, phase))
         self.base_subband = SubBand(self.base_freq, 0)
         self.base_subband.volume=8
 
-        self.volume = None
+        self.volume = 0
 
     def __str__(self):
         s = ["Band2(band = %d, freq=%.1f, volume=%d, [\n" % (self.band, self.base_freq, self.volume)]
@@ -237,7 +255,7 @@ class Band1(Band):
         self.base_subband = SubBand(self.base_freq, 0)
         self.base_subband.volume=8
 
-        self.volume = None
+        self.volume = 0
 
     def __str__(self):
         s = ["Band1(band = %d, freq=%.1f, volume=%d, [\n" % (self.band, self.base_freq, self.volume)]
@@ -288,7 +306,7 @@ class Frame:
         frame = array([0.0] * frame_len)
         for band in self.bands:
             band.generate(frame)
-        frame *= array([5000.0])
+        frame *= array([5000.0*2.1])
         return frame
 
     def unpack(self, data):
@@ -300,7 +318,10 @@ class Frame:
 
         return fdata
 
-    def pack(self, data):
+    def pack(self, data = None):
+        if data == None:
+            data = self.encode()
+
         ndata = []
         for i in range(32):
             val = data[i*2]|(data[i*2+1]<<4)
@@ -310,7 +331,7 @@ class Frame:
 
         return ndata
 
-def decode(fn, ofn):
+def decode(fn, ofn, start, num):
 
     input = open(fn, "r")
     out = wave.open(ofn, "w")
@@ -325,6 +346,11 @@ def decode(fn, ofn):
     hdr = input.read(2)
     print "hdr", `hdr`
 
+    if start:
+        input.read(32*start)
+
+    frame_num = start
+
     prev_result = array([0.0] * meta.frame_len)
 
     while 1:
@@ -336,13 +362,13 @@ def decode(fn, ofn):
         frame = Frame()
         fdata = frame.unpack(data)
         frame.decode(fdata)
-        if 0:
+        if 1:
             edata = frame.encode()
             assert fdata == edata
             edata2 = frame.pack(edata)
             assert data == edata2
 
-        print frame
+        print frame_num, frame
         result = frame.generate().tolist()
         print max(result), min(result)
 
@@ -351,7 +377,23 @@ def decode(fn, ofn):
         odata = struct.pack('h'*meta.frame_len,*out_frame)
         out.writeframes(odata)
         prev_result = result
+
+        frame_num += 1
+        if num:
+            num -= 1
+            if num == 0:
+                break
+
     out.close()
 
 if __name__ == "__main__":
-    decode(sys.argv[1], sys.argv[2])
+    print sys.argv
+    num = None
+    start = 0
+    if len(sys.argv)>3:
+        num = int(sys.argv[3])
+
+    if len(sys.argv)>4:
+        start = int(sys.argv[4])
+
+    decode(sys.argv[1], sys.argv[2], start, num)
