@@ -386,7 +386,7 @@ if 0:
     sys.exit(0)
 
 #test_00837_slow
-if 1:
+if 0:
     from decode import Frame
 
     f = open('dump_cartridge_black/00837.aud', 'rb')
@@ -408,6 +408,58 @@ if 1:
     out.write(foot)
     sys.exit(0)
         
+#test_band2_interactions
+if 1:
+    from decode import Frame
+    
+    silence = Frame()
+
+    start_marker = Frame()
+    start_marker.bands[10].volume=14
+
+    end_marker = Frame()
+    end_marker.bands[8].volume=14
+
+    start_frame = Frame()
+    start_frame.bands[2].volume=14
+    start_frame.bands[2].subbands[1].volume=7
+
+    end_frame = Frame()
+    end_frame.bands[2].volume=14
+    end_frame.bands[2].subbands[3].volume=7
+
+    data = silence.pack() * 15 + start_marker.pack()*3 + silence.pack() * 4
+    data += start_frame.pack()*20 + silence.pack() * 4
+
+    frame_num = 0
+    for ms in range(16):
+      for add_nibble in [0]:
+        for add_nibble_val in [0]:
+            frame = Frame()
+            frame.bands[15].volume = 14    # 8
+            frame.bands[14].volume = 13   # 8
+            frame.bands[13].volume = 12   # 8
+            frame.bands[12].volume = 11    # 6
+            frame.bands[11].volume = 10   # 6
+            frame.bands[10].volume = 9   # 2
+            frame.bands[2].volume = 8    # 1
+
+            f = frame.encode()
+            f[18] = ms
+            f[add_nibble] = add_nibble_val
+            sys.stderr.write("FRAME: %d: ms %d add_nibble %d add_nibble_val %d \n" % 
+                    (frame_num, ms, add_nibble, add_nibble_val))
+            frame_num += 1
+
+            data += start_frame.pack()*5 + frame.pack(f)*10 + silence.pack()*4
+
+    data += end_marker.pack() + silence.pack() * 4
+
+    out.write(hdr)
+    out.write(data)
+    out.write(foot)
+    sys.exit(0)
+
 silence = pack("00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00")
 data += silence*10 + frame1 + silence*10
 data = hdr + pack2(data) + foot

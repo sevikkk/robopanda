@@ -5,270 +5,310 @@ import struct
 import sys
 import wave
 import math
+import Image
 
-def tune(fn, start, end, shift = 0, corr = 0):
+class Analyzer:
+    def __init__(self, fn):
+        rdata = wave.open(fn,'r')
+        assert rdata.getnchannels() == 1
+        assert rdata.getsampwidth() == 2
+        assert rdata.getcomptype() == "NONE"
+        assert rdata.getframerate() == 32000
 
-    rdata = wave.open(fn,'r')
-    #print "channels",rdata.getnchannels()
-    #print "samplewidth",rdata.getsampwidth()
-    #print "framerate",rdata.getframerate()
-    #print "comptype",rdata.getcomptype()
-    assert rdata.getnchannels() == 1
-    assert rdata.getsampwidth() == 2
-    assert rdata.getframerate() == 48000
-    assert rdata.getcomptype() == "NONE"
+        self.rdata = rdata
+        self.frame_len = 512
+        self.corr = 0
+        self.corr_sum = 0
+        self.shift = 0
+        self.base = 0
+        self.descr = {}
+        self.pos = 0
 
-    frame_len = 768
-    frame_num = 0
+    def read_frame(self, frame_len = None):
+        if not frame_len:
+            frame_len = self.frame_len
 
-    corr_sum =  0
-
-    rdata.readframes(shift)
-
-    shifts = []
-
-    ok = 1
-    while 1:
-        if corr_sum > 1:
-            ns = int(corr_sum)
-            corr_sum -= ns
-            rdata.readframes(ns)
-            data = rdata.readframes(frame_len)
-            print "shifted %d samples forward" % ns
-        elif corr_sum < -1:
-            ns = int(-corr_sum)
-            corr_sum += ns
-            data = data[-ns:] + rdata.readframes(frame_len - ns)
-            print "shifted %d samples backward" % ns
-        else:
-            data = rdata.readframes(frame_len)
-
-        if len(data) != frame_len*2:
-            break
-
-        corr_sum += corr
-
-        if frame_num < start:
-            frame_num += 1
-            continue
-
-        if frame_num >= end:
-            break
-
+        data = self.rdata.readframes(frame_len)
         data = struct.unpack("h"*frame_len, data)
         data = [ -a for a in data ]
 
         fd = rfft(data, frame_len).tolist()
-        f = 62.5
-        print "%6d: "% (frame_num,),
-        power_500 = 0
-        phase_500 = None
-        for a in fd[1:]:
-            p = abs(a)
-            g = math.atan2(a.imag,a.real)/math.pi*180
-            if p>100000:
-                print "%8.3f: %7d %4d"% (f,p,g),
-            if f == 500:
-                power_500 = p
-                phase_500 = g
-            f += 62.5
-            if f >= 4000:
-                break
-        print
-        if power_500>1000000:
-            shift = phase_500/360*96
-            print "shift", shift
-            shifts.append(shift)
+        fd = fd[1:]
+        return fd
+
+    def read_frame_with_corr(self):
+        if self.corr_sum>1:
+            ns = int(self.corr_sum)
+            self.corr_sum -= ns
+        elif self.corr_sum < -1:
+            ns = int(self.corr_sum)
+            self.corr_sum -= ns
         else:
-            ok = 0
+            ns = 0
 
-        frame_num += 1
+        if ns != 0:
+            pos = self.rdata.tell() + ns
+            self.rdata.setpos(pos)
+        else:
+            pos = self.rdata.tell()
 
-    if ok:
-        sum = 0 
+        self.pos = pos*0.016/self.frame_len
+
+        res = self.read_frame()
+        self.corr_sum += self.corr
+
+        return res
+
+    def tune(self):
+
+        #print "channels",rdata.getnchannels()
+        #print "samplewidth",rdata.getsampwidth()
+        #print "framerate",rdata.getframerate()
+        #print "comptype",rdata.getcomptype()
+
+            
+        print ">>> search 2000 Hz burst"
+        frame_num = 0
+
+        b2000_start = None
+
+        while 1:
+            frame_len_2000 = self.frame_len/8
+            fd = self.read_frame(frame_len_2000)
+            total = 0
+            for a in fd:
+                total += abs(a)
+
+            p2000 = abs(fd[4])/total
+            #print "%3d %10.1f %0.2f" % (frame_num,total,p2000)
+            if not b2000_start:
+                if p2000>0.5:
+                    b2000_start = frame_num
+            elif p2000<0.5:
+                    b2000_end = frame_num
+                    break
+
+            frame_num += 1
+            if frame_num == 1000:
+                break
+
+        if (not b2000_start) or (not b2000_end) or (b2000_end - b2000_start>32) or (b2000_end - b2000_start<28):
+            raise RuntimeError,"valid 2 kHz burst not found"
+
+        print "found:", b2000_start, "-", b2000_end, "len", b2000_end - b2000_start
+
+        self.base = int((b2000_start + b2000_end)/2 * frame_len_2000 + self.frame_len * 7.5)
+
+        #print b500_zone*0.016/self.frame_len
+        self.rdata.setpos(self.base)
+
+        print ">>> search 500 Hz burst and tuning per frame correction"
+        frame_num = 0
+
+        shifts = []
+
+        ok = 1
+        while 1:
+            fd = self.read_frame()
+
+            f = 62.5
+            #print "%6d: "% (frame_num,),
+            power_500 = 0
+            phase_500 = None
+            for a in fd:
+                p = abs(a)
+                g = math.atan2(a.imag,a.real)/math.pi*180
+                #if p>100000:
+                #    print "%8.3f: %7d %4d"% (f,p,g),
+                if f == 500:
+                    power_500 = p
+                    phase_500 = g
+                f += 62.5
+                if f >= 4000:
+                    break
+            #print
+            if power_500>1000000:
+                shift = phase_500/360*(self.frame_len/8)
+                #print "shift", shift
+                shifts.append(shift)
+            else:
+                ok = 0
+
+            frame_num += 1
+            if frame_num == 15:
+                break
+
+        #print ok, shifts
+        if not ok:
+            raise RuntimeError, "valid 500Hz burst not found"
+
+        psum = 0 
         num = 0
         pshift = shifts[0]
         for shift in shifts[1:]:
-            sum += shift - pshift
+            psum += shift - pshift
             num += 1
-            print shift - pshift
+            #print "corr", shift - pshift
             pshift = shift
-        print "avg", sum/num
+        self.corr = -psum/num
+        print "per frame correction", self.corr
 
+        print ">>> tune 500Hz and 562.5Hz phase"
 
-def analyze(fn, corr = 0.8, shift = 4, frames = None, resync = None, big_resync = None, descr = None):
+        self.rdata.setpos(self.base)
+        self.corr_sum = 0
+        frame_num = 0
+        ok = 1
+        shifts = []
+        shifts_562 = []
 
-    if descr:
-        descr = open(descr, 'r').readlines()
+        while 1:
+            fd = self.read_frame_with_corr()
 
-    rdata = wave.open(fn,'r')
-    #print "channels",rdata.getnchannels()
-    #print "samplewidth",rdata.getsampwidth()
-    #print "framerate",rdata.getframerate()
-    #print "comptype",rdata.getcomptype()
-    assert rdata.getnchannels() == 1
-    assert rdata.getsampwidth() == 2
-    assert rdata.getframerate() == 48000
-    assert rdata.getcomptype() == "NONE"
+            f = 62.5
+            #print "%6d: "% (frame_num,),
+            power_500 = 0
+            phase_500 = None
+            power_562 = 0
+            phase_562 = None
+            for a in fd:
+                p = abs(a)
+                g = math.atan2(a.imag,a.real)/math.pi*180
+                #if p>100000:
+                #    print "%8.3f: %7d %4d"% (f,p,g),
+                if f == 500:
+                    power_500 = p
+                    phase_500 = g
+                if f == 562.5:
+                    power_562 = p
+                    phase_562 = g
+                f += 62.5
+                if f >= 4000:
+                    break
+            #print
+            if power_500>1000000 and power_562>1000000:
+                shift_500 = phase_500/360*(self.frame_len/8)
+                shift_562 = phase_562/360*(self.frame_len/9)
+                #print "shift", shift_500, shift_562
+                #print "pos",self.rdata.tell()*0.016/self.frame_len
+                shifts.append(shift_500)
+                shifts_562.append(shift_562)
+            else:
+                ok = 0
 
-    if frames:
-        frames.sort()
-        last_frame = frames[-1] + 1
-    else:
-        last_frame = -1
-
-    frame_len = 768
-    corr_sum = 0
-    rdata.readframes(shift)
-    last_resync = 0
-    
-    frame_num = 0
-    descr_num = 0
-
-    phase_corr = {
-            562.5:  -3,
-            750.0:  -20,
-            812.5:  -25,
-            875.0:  -30,
-            937.5:  -35,
-            1000.0: -40,
-            1250.0: -60,
-            1375.5: -65,
-            1375.0: -70,
-            1437.5: -75,
-            1500.0: -80,
-    }
-
-    while 1:
-        if corr_sum >= 1:
-            ns = int(corr_sum)
-            corr_sum -= ns
-            rdata.readframes(ns)
-            #print "shifted %d samples forward" % ns
-        elif corr_sum < -1:
-            ns = int(-corr_sum)
-            corr_sum += ns
-            old_pos = rdata.tell()
-            rdata.setpos(rdata.tell()-ns)
-            new_pos = rdata.tell()
-            #print "shifted %d samples backward (%d -> %d)" % (ns, old_pos, new_pos)
-
-        cur_pos = rdata.tell()
-        data = rdata.readframes(frame_len)
-
-        if len(data) != frame_len*2:
-            break
-
-        if frame_num == last_frame:
-            break
-
-        data = struct.unpack("h"*frame_len, data)
-        data = [ -a for a in data ]
-
-        fd = rfft(data, frame_len).tolist()
-        f = 62.5
-        do_print = 0
-
-        if frame_num>20 and (frame_num % 19) == 6:
-            if descr and descr_num < len(descr):
-                print descr[descr_num][:-1]
-                descr_num += 1
-
-        if (not frames) or (frame_num in frames):
-            do_print = 1
-            #print "%6d(%.5f): "% (frame_num,cur_pos/48000.0),
-            print "%6d: "% (frame_num,),
-
-        power_500 = 0
-        phase_500 = None
-        for a in fd[1:]:
-            p = abs(a)
-            g = math.atan2(a.imag,a.real)/math.pi*180
-            #pc = phase_corr.get(f,0)
-            orig_p = p
-            p = int(p/200000 + 0.5)*200000
-            orig_g = g
-            g = (int((g+360)/45 + 0.5)*45) % 360
-            if g>180:
-                g -= 360
-
-            if do_print and (p>200000):
-                print "%8.3f: %7d %4d"% (f,p,g),
-
-            if f == 500:
-                power_500 = orig_p
-                phase_500 = orig_g
-
-            f += 62.5
-            if f >= 4000:
+            frame_num += 1
+            if frame_num == 15:
                 break
-        if do_print:
+
+        #print ok, shifts
+        if not ok:
+            raise RuntimeError, "valid 500Hz burst not found"
+
+        shift_500 = sum(shifts)/len(shifts)
+        shift_562 = sum(shifts_562)/len(shifts_562)
+
+        self.shift = -shift_500
+        shift_562 += self.shift
+
+
+        if shift_562>6 and shift_562<8:
+            n = 3# +90 1
+        elif shift_562>13 and shift_562<15:
+            n = 2# +90 0
+
+        n = (self.frame_len/8)*n
+        self.shift += n
+        print "shift", self.shift
+
+        if 0:
+            frame=1
+            print ">>> check phase for frame %d" % frame
+
+            self.rdata.setpos(self.base)
+            self.corr_sum = self.shift + (23+19*frame)*(self.frame_len+self.corr)
+            frame_num = 0
+
+            while 1:
+                fd = self.read_frame_with_corr()
+
+                f = 62.5
+                print "%6d(%.3f): "% (frame_num, self.pos),
+                for a in fd:
+                    p = abs(a)
+                    g = math.atan2(a.imag,a.real)/math.pi*180
+                    if p>100000:
+                        print "%8.3f: %7d %4d"% (f,p,g),
+                    f += 62.5
+                    if f >= 4000:
+                        break
+                print
+
+                frame_num += 1
+                if frame_num == 19:
+                    break
+
+    def load_descr(self, descr):
+        for l in open(descr,"r").readlines():
+            l = l[:-1].split(None,2)
+            if len(l)!=3:
+                continue
+            if l[0] != "FRAME:":
+                continue
+            sample_num = int(l[1][:-1])
+            self.descr[sample_num] = l[2]
+
+    def dump(self):
+        start_sample= 0
+        self.rdata.setpos(self.base)
+        self.corr_sum = self.shift + (19+19*start_sample)*(self.frame_len+self.corr)
+        sample_num = 0
+        frame_num = 0
+
+        shift_500 = 0
+
+        while 1:
+            if frame_num == 0:
+                if sample_num in self.descr:
+                    print "###",self.descr[sample_num]
+                sample_num += 1
+                frame_num = 0
+
+            fd = self.read_frame_with_corr()
+
+            p500 = 0
+            g500 = 0
+            f = 62.5
+            print "%6d(%.3f): "% (frame_num, self.pos),
+            for a in fd:
+                p = abs(a)
+                g = math.atan2(a.imag,a.real)/math.pi*180
+                if p>100000:
+                    print "%8.3f: %7d %4d"% (f,p,g),
+                    if f == 500:
+                        p500 = p
+                        g500 = g
+                f += 62.5
+                if f >= 4000:
+                    break
             print
 
-        if resync and frame_num in resync:
-            if power_500>1000000:
-                ns = phase_500/360*96
-                if big_resync and frame_num in big_resync:
-                    ns += big_resync[frame_num] * 96
-                    print "big resync", -ns, "instead of", corr_sum, "frame", frame_num
+            if frame_num in (4,5):
+                if p500<1000000:
+                    raise RuntimeError, "500Hz burst not found"
 
-                    last_resync = frame_num
-                    corr_sum = -ns
-                else:
-                    if abs(ns)<5:
-                        #print "resync", -ns, "instead of", corr_sum, "error", (corr_sum + ns)/(frame_num - last_resync), "frame", frame_num
-                        corr -= (corr_sum + ns)/(frame_num - last_resync)
+                shift_500 += g500/360*(self.frame_len/8)
+            if frame_num == 5:
+                #print "need corr", shift_500/3
+                self.corr_sum -= shift_500/2
 
-                        last_resync = frame_num
-                        corr_sum = -ns
-                    else:
-                        print "resync failed, ns", ns,"too big. frame", frame_num
-            else:
-                print "resync failed, power_500", power_500,"to small. frame", frame_num
+            frame_num += 1
 
-        corr_sum += corr
-
-        frame_num += 1
-
+            if frame_num == 19:
+                frame_num = 0
 
 if __name__ == "__main__":
-    shift = 582
-    corr = 0.938198046099
-
-    shift = 768*6
-    corr = 0
-    if 0:
-        # find corr and initial value of shift
-        tune(sys.argv[1], 8, 12, shift, corr)
-    if 0:
-        # find corrected value of shift for 562.5Hz align
-        for shift2 in range(768):
-            print "shift", shift + shift2*96
-            analyze(sys.argv[1], shift = shift+shift2*96, corr = corr, frames = [0,1,2,3,4,5,6,7,8,9,10,11])
-    if 0:
-        # fing final value of shift
-        for shift2 in range(-3, 4):
-            print "shift", shift + shift2
-            analyze(sys.argv[1], shift = shift+shift2, corr = corr, frames = range(9,16))
-    if 1:
-        #full decode for determining of resync and data frames
-        analyze(sys.argv[1], shift = shift, corr = corr,
-                resync = [18 + n*19 for n in range(20000)],
-                frames = [25 + n*19 for n in range(20000)],
-                descr = sys.argv[2])
-    if 0:
-        #decode only needed frames
-        analyze(sys.argv[1], shift = shift, corr = corr, 
-                resync = [13 + n*31 for n in range(20000)] + [4633],
-                frames = [25 + n*31 for n in range(20000)],
-                big_resync = {
-                    1036: 1, 
-                    1253: 4, 
-                    4632: 5+16, 4633: 0,
-                    4663: 1,
-                    4756: 4,
-                },
-                descr = sys.argv[2])
-
-    
-
+    analyzer = Analyzer(sys.argv[1])
+    analyzer.tune()
+    if len(sys.argv)>2:
+        analyzer.load_descr(sys.argv[2])
+    analyzer.dump()
