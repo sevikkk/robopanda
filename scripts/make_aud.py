@@ -433,16 +433,15 @@ if 1:
 
     frame_num = 0
     for ms in range(16):
-      for add_nibble in [0]:
-        for add_nibble_val in [0]:
+      for add_nibble in [19]:
+        for add_nibble_val in range(16):
             frame = Frame()
-            frame.bands[15].volume = 14    # 8
+            frame.bands[15].volume = 13    # 8
             frame.bands[14].volume = 13   # 8
-            frame.bands[13].volume = 12   # 8
-            frame.bands[12].volume = 11    # 6
-            frame.bands[11].volume = 10   # 6
-            frame.bands[10].volume = 9   # 2
-            frame.bands[2].volume = 8    # 1
+            frame.bands[13].volume = 13   # 8
+            frame.bands[12].volume = 13    # 6
+            frame.bands[11].volume = 13   # 6
+            frame.bands[2].volume = 12   # 2
 
             f = frame.encode()
             f[18] = ms

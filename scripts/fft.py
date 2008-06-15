@@ -210,17 +210,22 @@ class Analyzer:
         self.shift = -shift_500
         shift_562 += self.shift
 
+        print shift_562
 
         if shift_562>6 and shift_562<8:
             n = 3# +90 1
         elif shift_562>13 and shift_562<15:
             n = 2# +90 0
+        else:
+            n = 8 # 8 - 90
+            n = 9 # 9 - 130
+            n = 10 # 10 - 180
 
         n = (self.frame_len/8)*n
         self.shift += n
         print "shift", self.shift
 
-        if 0:
+        if 1:
             frame=1
             print ">>> check phase for frame %d" % frame
 
@@ -266,10 +271,13 @@ class Analyzer:
 
         shift_500 = 0
 
+        cur_descr = ""
+
         while 1:
             if frame_num == 0:
                 if sample_num in self.descr:
-                    print "###",self.descr[sample_num]
+                    #print "###",self.descr[sample_num]
+                    cur_descr = self.descr[sample_num]
                 sample_num += 1
                 frame_num = 0
 
@@ -278,19 +286,49 @@ class Analyzer:
             p500 = 0
             g500 = 0
             f = 62.5
-            print "%6d(%.3f): "% (frame_num, self.pos),
+            
+            prn = []
+
             for a in fd:
+                if f<500:
+                    f += 62.5
+                    continue
+
                 p = abs(a)
                 g = math.atan2(a.imag,a.real)/math.pi*180
-                if p>100000:
-                    print "%8.3f: %7d %4d"% (f,p,g),
-                    if f == 500:
-                        p500 = p
-                        g500 = g
+                if f == 500 and p>100000:
+                    p500 = p
+                    g500 = g
+
+                if abs(a.imag)>30000:
+                    if a.imag<0:
+                        k = -1
+                    else:
+                        k = 1
+                    prn.append("%5.0fs: %4d"% (f*k,k*a.imag/10000))
+                else:
+                    prn.append(" "*12)
+
+                if abs(a.real)>30000:
+                    if a.real<0:
+                        k = -1
+                    else:
+                        k = 1
+                    prn.append("%5.0fc: %4d"% (k*f,k*a.real/10000))
+                else:
+                    prn.append(" "*12)
+
                 f += 62.5
-                if f >= 4000:
+                if f > 750:
                     break
-            print
+
+            prn.append("%6d(%.3f):"% (frame_num, self.pos))
+
+            if cur_descr:
+                prn.append(cur_descr)
+
+            if frame_num in (11,):
+                print " ".join(prn)
 
             if frame_num in (4,5):
                 if p500<1000000:
@@ -305,6 +343,7 @@ class Analyzer:
 
             if frame_num == 19:
                 frame_num = 0
+                cur_descr = ""
 
 if __name__ == "__main__":
     analyzer = Analyzer(sys.argv[1])
