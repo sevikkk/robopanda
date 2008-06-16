@@ -55,8 +55,9 @@ class Meta:
         self.filter2 = array([0.0] * frame_len)
         for i in range(frame_len):
             w = math.sin(math.pi/2*i/frame_len)
+            w=w*w
             self.filter1[i] = w
-            self.filter2[frame_len-i-1] = w
+            self.filter2[frame_len-1 - i] = w
 
 meta = Meta(512)
 
@@ -67,14 +68,6 @@ class SubBand:
 
         self.volume = 0
         self.inverse = 0
-        self.format = "aaai"
-
-    def decode(self, value):
-        self.volume = value >> 1
-        self.inverse = value & 1
-
-    def encode(self):
-        return self.volume << 1 | self.inverse
 
     def __str__(self):
         return "SubBand(freq=%.1f, phase=%d, volume=%d, inverse=%d)" % (
@@ -91,7 +84,7 @@ class SubBand:
         k = -k # robopanda output is inverted
 
         for i in range(len(frame)):
-            x = math.cos(fi) * k
+            x = math.sin(fi) * k
             frame[i] += x
             fi += delta_fi
 
@@ -146,49 +139,57 @@ class Band:
 
     def decode(self, frame):
         self.volume = frame[self.band]
+        self.main_subband = frame[self.frame_offset] & 0x7
+        self.inverse = frame[self.frame_offset] >> 3
 
-        if self.format == 8:
-            subframe = frame[self.frame_offset:self.frame_offset+8] + [0]
-        elif self.format == 6:
-            subframe_packed = frame[self.frame_offset:self.frame_offset+6]
-            subframe = subframe_packed[:4]
-            subframe += [subframe_packed[4] & 3,subframe_packed[4]>>2]
-            subframe += [subframe_packed[5] & 3,subframe_packed[5]>>2]
-            subframe += [0]
-            for b in range(4,8):
-                if b <= self.main_subband:
-                    subframe[b] = subframe[b]<<2 # ia -> ia00
-                else:
-                    subframe[b] = ((subframe[b] & 2) << 2) | (subframe[b] & 1) # ai -> a00i
-        elif self.format == 2:
-            subframe = [frame[self.frame_offset],0,0,0,0,0,0,0,0]
-            subval1 = frame[self.frame_offset+1] & 3
-            subval2 = frame[self.frame_offset+1] >> 2
-            subframe[self.main_subband] = subval1<<2 # ia -> ia00
-            subframe[self.main_subband+1] = ((subval2 & 2) << 2) | (subval2 & 1) # ai -> a00i
-
-        else:
-            subframe = [frame[self.frame_offset],0,0,0,0,0,0,0,0]
-
-        self.main_subband = subframe[0] & 0x7
-        self.inverse = subframe[0] >> 3
+        for b in range(9):
+            cs = self.subbands[b]
+            cs.volume = 0
+            cs.inverse = 0
 
         ms = self.subbands[self.main_subband]
         ms.volume = 8
+        ms.inverse = self.inverse
 
-        offset = 1
-        for b in range(9):
-            cs = self.subbands[b]
-            if b < self.main_subband:
-                cs.volume = subframe[offset] & 0x7
-                cs.inverse = subframe[b] >> 3
-                offset += 1
-            elif b == self.main_subband:
-                cs.inverse = subframe[b] >> 3
+        if self.format in (6,8):
+            if self.format == 8:
+                subframe = frame[self.frame_offset:self.frame_offset+8]
             else:
-                cs.volume = subframe[offset] >> 1
-                cs.inverse = subframe[offset] & 1
-                offset += 1
+                subframe_packed = frame[self.frame_offset:self.frame_offset+6]
+                subframe = subframe_packed[:4]
+                subframe += [subframe_packed[4] & 3,subframe_packed[4]>>2]
+                subframe += [subframe_packed[5] & 3,subframe_packed[5]>>2]
+
+                for b in range(4,8):
+                    if b <= self.main_subband:
+                        subframe[b] = subframe[b]<<2 # ia -> ia00
+                    else:
+                        subframe[b] = ((subframe[b] & 2) << 3) | (subframe[b] & 1) # ai -> a00i
+
+            offset = 1
+            for b in range(8):
+                cs = self.subbands[b]
+                if b < self.main_subband:
+                    cs.volume = subframe[offset] & 0x7
+                    cs.inverse = subframe[b] >> 3
+                    offset += 1
+                elif b == self.main_subband:
+                    cs.inverse = subframe[b] >> 3
+                else:
+                    cs.volume = subframe[offset] >> 1
+                    cs.inverse = subframe[offset] & 1
+                    offset += 1
+
+        elif self.format == 2:
+            sub1_volume = (frame[self.frame_offset+1] & 1) << 3
+            sub1_inverse = (frame[self.frame_offset+1] & 2) >> 1
+            sub2_volume = (frame[self.frame_offset+1] & 4) >> 1
+            sub2_inverse = (frame[self.frame_offset+1] & 8) >> 3
+
+            self.subbands[self.main_subband-1].volume = sub1_volume
+            self.subbands[self.main_subband-1].inverse = sub1_inverse
+            self.subbands[self.main_subband+1].volume = sub2_volume
+            self.subbands[self.main_subband+1].inverse = sub2_inverse
 
     def generate(self, frame):
         band_frame = array([0.0] * len(frame))

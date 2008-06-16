@@ -75,7 +75,7 @@ class Analyzer:
         while 1:
             frame_len_2000 = self.frame_len/8
             fd = self.read_frame(frame_len_2000)
-            total = 0
+            total = 1
             for a in fd:
                 total += abs(a)
 
@@ -166,7 +166,7 @@ class Analyzer:
             fd = self.read_frame_with_corr()
 
             f = 62.5
-            #print "%6d: "% (frame_num,),
+            print "%6d: "% (frame_num,),
             power_500 = 0
             phase_500 = None
             power_562 = 0
@@ -174,8 +174,8 @@ class Analyzer:
             for a in fd:
                 p = abs(a)
                 g = math.atan2(a.imag,a.real)/math.pi*180
-                #if p>100000:
-                #    print "%8.3f: %7d %4d"% (f,p,g),
+                if p>100000:
+                    print "%8.3f: %7d %4d"% (f,p,g),
                 if f == 500:
                     power_500 = p
                     phase_500 = g
@@ -185,12 +185,12 @@ class Analyzer:
                 f += 62.5
                 if f >= 4000:
                     break
-            #print
-            if power_500>1000000 and power_562>1000000:
+            print
+            if power_500>500000 and power_562>500000:
                 shift_500 = phase_500/360*(self.frame_len/8)
                 shift_562 = phase_562/360*(self.frame_len/9)
-                #print "shift", shift_500, shift_562
-                #print "pos",self.rdata.tell()*0.016/self.frame_len
+                print "shift", shift_500, shift_562
+                print "pos",self.rdata.tell()*0.016/self.frame_len
                 shifts.append(shift_500)
                 shifts_562.append(shift_562)
             else:
@@ -217,9 +217,9 @@ class Analyzer:
         elif shift_562>13 and shift_562<15:
             n = 2# +90 0
         else:
-            n = 8 # 8 - 90
-            n = 9 # 9 - 130
-            n = 10 # 10 - 180
+            n = 0 # 0 - 0
+            n = 1 # 0 - 45
+            n = 4 # 0 - 45
 
         n = (self.frame_len/8)*n
         self.shift += n
