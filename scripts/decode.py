@@ -183,12 +183,12 @@ class Band:
         frame[self.band] = self.volume
 
         ms = self.subbands[self.main_subband]
-        assert ms.volume == 8
+        assert ms.volume == 8 # XXX
 
         subframe = [0] * 8
 
         #main inverse
-        if self.format in (6,8):
+        if self.format in (4,6,8):
             self.inverse = self.subbands[0].inverse
             for b in range(1,8):
                 pb = self.subbands[b-1]
@@ -206,6 +206,23 @@ class Band:
                         subframe[b] = ((subframe[b] & 8) >> 2) | (subframe[b] & 1) # a00i -> ai
                 subframe[4] = (subframe[5] << 2) | subframe[4]
                 subframe[5] = (subframe[7] << 2) | subframe[6]
+
+            elif self.format == 4:
+                for b in range(1,8):
+                    if b <= self.main_subband:
+                        subframe[b] = subframe[b]>>2 # ia00 -> ia
+                    else:
+                        subframe[b] = ((subframe[b] & 8) >> 2) | (subframe[b] & 1) # a00i -> ai
+
+                if self.main_subband>3:
+                    del subframe[1]
+                    self.inverse = self.subbands[1].inverse
+                else:
+                    self.inverse = self.subbands[0].inverse
+
+                subframe[1] = (subframe[2] << 2) | subframe[1]
+                subframe[2] = (subframe[4] << 2) | subframe[3]
+                subframe[3] = (subframe[6] << 2) | subframe[5]
 
         elif self.format == 2:
             if self.main_subband == 0:
@@ -249,10 +266,10 @@ class Band:
         ms.volume = 8
         ms.inverse = self.inverse
 
-        if self.format in (6,8):
+        if self.format in (4,6,8):
             if self.format == 8:
                 subframe = frame[self.frame_offset:self.frame_offset+8]
-            else:
+            elif self.format == 6:
                 subframe_packed = frame[self.frame_offset:self.frame_offset+6]
                 subframe = subframe_packed[:4]
                 subframe += [subframe_packed[4] & 3,subframe_packed[4]>>2]
@@ -263,6 +280,28 @@ class Band:
                         subframe[b] = subframe[b]<<2 # ia -> ia00
                     else:
                         subframe[b] = ((subframe[b] & 2) << 2) | (subframe[b] & 1) # ai -> a00i
+            elif self.format == 4:
+                    subframe_packed = frame[self.frame_offset:self.frame_offset+4]
+                    subframe = subframe_packed[:1]
+                    if self.main_subband>3:
+                        subframe += [0]
+
+                    subframe += [subframe_packed[1] & 3,subframe_packed[1]>>2]
+                    subframe += [subframe_packed[2] & 3,subframe_packed[2]>>2]
+                    subframe += [subframe_packed[3] & 3,subframe_packed[3]>>2]
+
+                    if self.main_subband<4:
+                        subframe += [0]
+
+                    for b in range(1,8):
+                        if b <= self.main_subband:
+                            subframe[b] = subframe[b]<<2 # ia -> ia00
+                        else:
+                            subframe[b] = ((subframe[b] & 2) << 2) | (subframe[b] & 1) # ai -> a00i
+
+                    if self.main_subband>3:
+                        subframe[1] = self.inverse << 3
+                        self.inverse = 0
 
             offset = 1
             for b in range(8):
@@ -312,6 +351,9 @@ class Band:
         frame += band_frame * array([meta.main_volumes[15-self.volume]])
 
 class Frame:
+    sizes = [8,8,8,6,6,2] 
+    frame_len = 64
+
     def __init__(self):
         self.bands = [
                 Band(0),
@@ -339,10 +381,10 @@ class Frame:
             self.bands[i].format = 1
 
         volumes.sort()
-        sizes = [8,8,8,6,6,2] 
+        sizes = self.sizes[:]
         #print volumes
 
-        for v,b in volumes[:6]:
+        for v,b in volumes[:len(sizes)]:
             self.bands[b].format = sizes[0]
             sizes = sizes[1:]
 
@@ -365,7 +407,7 @@ class Frame:
         # and subband volumes scaled accordingly
         #
         # inverse and format will be recalculated
-        frame = [0]*64
+        frame = [0]*self.frame_len
 
         self.set_format_and_offsets(frame)
         for i in range(16):
@@ -388,7 +430,7 @@ class Frame:
         return frame
 
     def unpack(self, data):
-        data = struct.unpack("B"*32, data)
+        data = struct.unpack("B"*(self.frame_len/2), data)
         fdata = []
         for b in data:
             fdata.append(b & 0xf)
@@ -401,13 +443,21 @@ class Frame:
             data = self.encode()
 
         ndata = []
-        for i in range(32):
+        nb = len(data)/2
+        for i in range(nb):
             val = data[i*2]|(data[i*2+1]<<4)
             ndata.append(val)
 
-        ndata = struct.pack("B"*32, *ndata)
+        ndata = struct.pack("B"*nb, *ndata)
 
         return ndata
+
+class Frame7(Frame):
+    pass
+
+class Frame9(Frame):
+    sizes = [8,8,8,8,8,8,6,6,4,4,2,2,2,2,2,2] 
+    frame_len = 96
 
 def decode(fn, ofn, start, num):
 
@@ -422,10 +472,15 @@ def decode(fn, ofn, start, num):
     #print "local_volumes_table", meta.local_volumes
 
     hdr = input.read(2)
+    if hdr[0] == '\x07':
+        frame_factory = Frame7
+    else:
+        frame_factory = Frame9
     #print "hdr", `hdr`
 
+    nb = frame_factory().frame_len/2
     if start:
-        input.read(32*start)
+        input.read(start*nb)
 
     frame_num = start
 
@@ -434,20 +489,20 @@ def decode(fn, ofn, start, num):
     filter = Filter()
 
     while 1:
-        data = input.read(32)
-        if len(data) != 32:
+        data = input.read(nb)
+        if len(data) != nb:
             #print "foot", `data`
             break
 
-        frame = Frame()
+        frame = frame_factory()
         fdata = frame.unpack(data)
         frame.decode(fdata)
-        if 0:
+        if 1:
             edata = frame.encode()
             if fdata != edata:
                 print "fdata", fdata
                 print "edata", edata
-                ef = Frame()
+                ef = frame_factory()
                 ef.decode(edata)
                 for b in range(16):
                     print b

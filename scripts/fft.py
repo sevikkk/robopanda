@@ -296,6 +296,7 @@ class Analyzer:
 
                 p = abs(a)
                 g = math.atan2(a.imag,a.real)/math.pi*180
+                #print f, a.imag, a.real
                 if f == 500 and p>100000:
                     p500 = p
                     g500 = g
@@ -331,7 +332,8 @@ class Analyzer:
                 print " ".join(prn)
 
             if frame_num in (4,5):
-                if p500<1000000:
+                if p500<500000:
+                    print "p500", p500
                     raise RuntimeError, "500Hz burst not found"
 
                 shift_500 += g500/360*(self.frame_len/8)

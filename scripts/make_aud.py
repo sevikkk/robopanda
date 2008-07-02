@@ -409,7 +409,7 @@ if 0:
     sys.exit(0)
         
 #test_band2_interactions
-if 1:
+if 0:
     from decode import Frame
     
     silence = Frame()
@@ -454,6 +454,65 @@ if 1:
 
     data += end_marker.pack() + silence.pack() * 4
 
+    out.write(hdr)
+    out.write(data)
+    out.write(foot)
+    sys.exit(0)
+
+#test_band4_interactions
+if 1:
+    from decode import Frame9 as Frame
+    
+    silence = Frame()
+
+    start_marker = Frame()
+    start_marker.bands[10].volume=14
+
+    end_marker = Frame()
+    end_marker.bands[8].volume=14
+
+    start_frame = Frame()
+    start_frame.bands[2].volume=14
+    start_frame.bands[2].subbands[1].volume=7
+
+    end_frame = Frame()
+    end_frame.bands[2].volume=14
+    end_frame.bands[2].subbands[3].volume=7
+
+    data = silence.pack() * 15 + start_marker.pack()*3 + silence.pack() * 4
+    data += start_frame.pack()*20 + silence.pack() * 4
+
+    frame_num = 0
+    for ms in range(8):
+        for sb in range(6):
+            for sb_inv in range(2):
+                for sb_vol in (0,4):
+                    frame = Frame()
+                    frame.bands[15].volume = 13    # 8
+                    frame.bands[14].volume = 13   # 8
+                    frame.bands[13].volume = 13   # 8
+                    frame.bands[12].volume = 13    # 8
+                    frame.bands[11].volume = 13   # 8
+                    frame.bands[10].volume = 13   # 8
+                    frame.bands[9].volume = 13   # 6
+                    frame.bands[8].volume = 13   # 6
+
+                    frame.bands[2].volume = 12   # 4
+                    frame.bands[2].inverse = 0
+                    frame.bands[2].main_subband = ms
+                    frame.bands[2].subbands[sb].volume = sb_vol
+                    frame.bands[2].subbands[sb].inverse = sb_inv
+
+                    f = frame.encode()
+                    sys.stderr.write("FRAME: %d: ms %d sb %d sb_vol %d sb_inv %d\n" % 
+                            (frame_num, ms, sb, sb_vol, sb_inv))
+                    frame_num += 1
+
+                    data += start_frame.pack()*5 + frame.pack(f)*10 + silence.pack()*4
+
+    data += end_marker.pack() + silence.pack() * 4
+
+    hdr = pack2(pack("09 80"))
     out.write(hdr)
     out.write(data)
     out.write(foot)

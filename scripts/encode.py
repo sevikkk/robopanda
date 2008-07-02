@@ -30,7 +30,7 @@ def encode(fn,ofn):
     #print "using %d samples per frame" % frame_len
 
     out = open(ofn, "wb")
-    out.write("\x07\x80")
+    out.write("\x09\x80")
     frame_num = 0
 
     window = []
@@ -63,7 +63,7 @@ def encode(fn,ofn):
 
         cur_data = struct.unpack("h"*frame_len, cur_data)
 
-        frame = decode.Frame()
+        frame = decode.Frame9()
 
         data = list(cur_data)
 
@@ -78,20 +78,20 @@ def encode(fn,ofn):
             (bc, sc), (bs, ss) = freq_map[f]
 
             if bc>=0 and bc<=15:
-                frame.bands[bc].subbands[sc].volume = abs(a.real)/500000.0
+                frame.bands[bc].subbands[sc].volume = abs(a.real)/5000000.0
                 if a.real<0:
                     frame.bands[bc].subbands[sc].inverse = 1
                 else:
                     frame.bands[bc].subbands[sc].inverse = 0
 
             if bs>=0 and bs<=15:
-                frame.bands[bs].subbands[ss].volume = abs(a.imag)/500000.0
+                frame.bands[bs].subbands[ss].volume = abs(a.imag)/5000000.0
                 if a.imag<0:
                     frame.bands[bs].subbands[ss].inverse = 1
                 else:
                     frame.bands[bs].subbands[ss].inverse = 0
 
-            if f > 4000:
+            if f >= 4000:
                 break
 
             f += 62.5
