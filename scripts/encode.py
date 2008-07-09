@@ -5,6 +5,7 @@
 """
 
 from numpy.fft import rfft
+from numpy import array
 import struct
 import sys
 import wave
@@ -13,6 +14,25 @@ import decode
 
 def encode(fn,ofn):
 
+    freq_resp = {
+            0:     10000,
+            1:     7920,
+            2:     4715,
+            3:     4469,
+            4:     4141,
+            5:     3785,
+            6:     3416,
+            7:     3047,
+            8:     2590,
+            9:     2360,
+            10:    2049,
+            11:    1765,
+            12:    1503,
+            13:    1267,
+            14:    1057,
+            15:    871,
+            16:    871
+    }
     rdata = wave.open(fn,'r')
     #print "channels",rdata.getnchannels()
     #print "samplewidth",rdata.getsampwidth()
@@ -33,42 +53,39 @@ def encode(fn,ofn):
     out.write("\x09\x80")
     frame_num = 0
 
-    window = []
-    for i in range(frame_len):
-        x = math.pi*(i-frame_len/2)/frame_len*2
-        if x == 0:
-            win = 1
-        else:
-            win = math.sin(x)/x
-        window.append(win)
-    #print "window", window
-
     freq_map = {}
     for b in range(16):
         for sb in range(5):
             f = b * 250.0 + 62.5 * sb
             if sb == 0:
-                freq_map[f] =  ((b-1,7),(b,0))
+                freq_map[f] =  ((b,0), (b-1,7))
             elif sb == 4:
-                freq_map[f] =  ((b,sb*2-1),(b+1,0))
+                freq_map[f] =  ((b+1,0),(b,sb*2-1))
             else:
-                freq_map[f] =  ((b,sb*2-1),(b,sb*2))
+                freq_map[f] =  ((b,sb*2),(b,sb*2-1))
+
+    cur_data = rdata.readframes(frame_len)
+    cur_data = array(struct.unpack("h"*frame_len, cur_data))
+    next_data = rdata.readframes(frame_len)
+    next_data = array(struct.unpack("h"*frame_len, next_data))
 
     super_max = 0
     while 1:
-        cur_data = rdata.readframes(frame_len)
+        prev_data = cur_data
+        cur_data = next_data
+        next_data = rdata.readframes(frame_len)
 
-        if len(cur_data) != frame_len*2:
+        if len(next_data) != frame_len*2:
             break
 
-        cur_data = struct.unpack("h"*frame_len, cur_data)
+        next_data = array(struct.unpack("h"*frame_len, next_data))
 
         frame = decode.Frame9()
 
-        data = list(cur_data)
-
-        #for i in range(frame_len):
-        #    data[i] = data[i] * window[i]
+        #data = cur_data - decode.meta.filter1*(next_data - decode.meta.filter2*cur_data) - decode.meta.filter2*(prev_data - decode.meta.filter2*cur_data)
+        data = cur_data + cur_data + next_data + prev_data
+        #data = cur_data
+        data = data * array([1.0/16384/3])
 
         fd = rfft(data, frame_len).tolist()
         f = 62.5
@@ -76,25 +93,42 @@ def encode(fn,ofn):
         for a in fd[1:]:
 
             (bc, sc), (bs, ss) = freq_map[f]
+            corr = 5000.0/freq_resp[bc]
+
+            if f<250:
+                a = abs(a) + 0j
 
             if bc>=0 and bc<=15:
-                frame.bands[bc].subbands[sc].volume = abs(a.real)/5000000.0
-                if a.real<0:
-                    frame.bands[bc].subbands[sc].inverse = 1
-                else:
+                frame.bands[bc].subbands[sc].volume = abs(a.real)/decode.meta.frame_len*corr
+                if a.real>0:
                     frame.bands[bc].subbands[sc].inverse = 0
+                else:
+                    frame.bands[bc].subbands[sc].inverse = 1
 
             if bs>=0 and bs<=15:
-                frame.bands[bs].subbands[ss].volume = abs(a.imag)/5000000.0
-                if a.imag<0:
-                    frame.bands[bs].subbands[ss].inverse = 1
-                else:
+                frame.bands[bs].subbands[ss].volume = abs(a.imag)/decode.meta.frame_len*corr
+                if a.imag>0:
                     frame.bands[bs].subbands[ss].inverse = 0
+                else:
+                    frame.bands[bs].subbands[ss].inverse = 1
 
             if f >= 4000:
                 break
 
             f += 62.5
+
+        if 0:
+            s = ["%5d" % frame_num]
+            for b in range(3):
+                s.append("|")
+                s.append("%6.3f" % frame.bands[b].volume)
+                for sb in range(8):
+                    v = frame.bands[b].subbands[sb].volume
+                    if frame.bands[b].subbands[sb].inverse:
+                        v = -v
+                    s.append("%6.3f" % v)
+
+            print " ".join(s)
 
         #print frame
         for b in range(16):
@@ -119,6 +153,19 @@ def encode(fn,ofn):
                 else:
                     sbo.volume = decode.meta.get_local_volume(main_volume, sbo.volume)
 
+        if 0:
+            s = ["%5d" % frame_num]
+            for b in range(3):
+                s.append("|")
+                s.append("%6d" % frame.bands[b].volume)
+                for sb in range(8):
+                    v = frame.bands[b].subbands[sb].volume
+                    if frame.bands[b].subbands[sb].inverse:
+                        v = -v
+                    s.append("%6d" % v)
+
+            print " ".join(s)
+
         #print frame
         d = frame.encode()
         #print d
@@ -128,6 +175,10 @@ def encode(fn,ofn):
         frame_num += 1
         #if frame_num > 100:
         #    break
+        if 1:
+            if frame_num % 20 == 0:
+                print "\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b",frame_num,
+                sys.stdout.flush()
     out.write("\xFF\xFF\x00\x00")
     print "super_max:", super_max
 

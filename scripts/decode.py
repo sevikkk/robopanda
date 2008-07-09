@@ -141,14 +141,14 @@ class Band:
 
         self.subbands = []
         for freq, phase in [
-                (0,   0), #0    500.0
-                (1, 180), #1    562.5
+                (0,  90), #0    500.0
+                (1,   0), #1    562.5
                 (1,  90), #2    562.5
-                (2, -90), #3    625.0
-                (2, 180), #4    625.0
+                (2,   0), #3    625.0
+                (2,  90), #4    625.0
                 (3,   0), #5    687.5
-                (3, -90), #6    687.5
-                (4,  90), #7    750.0
+                (3,  90), #6    687.5
+                (4,   0), #7    750.0
             ]:
             self.subbands.append(SubBand(self.base_freq + 62.5 * freq, phase))
 
@@ -183,166 +183,160 @@ class Band:
         frame[self.band] = self.volume
 
         ms = self.subbands[self.main_subband]
-        assert ms.volume == 8 # XXX
+        assert ms.volume == 8
 
+        # building base frame
         subframe = [0] * 8
 
-        #main inverse
-        if self.format in (4,6,8):
-            self.inverse = self.subbands[0].inverse
-            for b in range(1,8):
-                pb = self.subbands[b-1]
-                cb = self.subbands[b]
-                if b <= self.main_subband:
-                    subframe[b] = pb.volume | (cb.inverse << 3)
-                else:
-                    subframe[b] = (cb.volume<<1) | cb.inverse
-
-            if self.format == 6:
-                for b in range(4,8):
-                    if b <= self.main_subband:
-                        subframe[b] = subframe[b]>>2 # ia00 -> ia
-                    else:
-                        subframe[b] = ((subframe[b] & 8) >> 2) | (subframe[b] & 1) # a00i -> ai
-                subframe[4] = (subframe[5] << 2) | subframe[4]
-                subframe[5] = (subframe[7] << 2) | subframe[6]
-
-            elif self.format == 4:
-                for b in range(1,8):
-                    if b <= self.main_subband:
-                        subframe[b] = subframe[b]>>2 # ia00 -> ia
-                    else:
-                        subframe[b] = ((subframe[b] & 8) >> 2) | (subframe[b] & 1) # a00i -> ai
-
-                if self.main_subband>3:
-                    del subframe[1]
-                    self.inverse = self.subbands[1].inverse
-                else:
-                    self.inverse = self.subbands[0].inverse
-
-                subframe[1] = (subframe[2] << 2) | subframe[1]
-                subframe[2] = (subframe[4] << 2) | subframe[3]
-                subframe[3] = (subframe[6] << 2) | subframe[5]
-
-        elif self.format == 2:
-            if self.main_subband == 0:
-                self.inverse = ms.inverse
-                b0 = self.subbands[1].inverse
-                b1 = self.subbands[1].volume >> 2
-                b2 = self.subbands[2].inverse
-                b3 = self.subbands[2].volume >> 2
-            elif self.main_subband == 7:
-                self.inverse = self.subbands[5].inverse
-                b0 = self.subbands[5].volume >> 2
-                b1 = self.subbands[6].inverse
-                b2 = self.subbands[6].volume >> 2
-                b3 = self.subbands[7].inverse
+        for b in range(1,8):
+            pb = self.subbands[b-1]
+            cb = self.subbands[b]
+            if b <= self.main_subband:
+                subframe[b] = pb.volume | (cb.inverse << 3)
             else:
-                self.inverse = self.subbands[self.main_subband-1].inverse
-                b0 = self.subbands[self.main_subband-1].volume >> 2
-                b1 = self.subbands[self.main_subband].inverse
-                b2 = self.subbands[self.main_subband+1].inverse
-                b3 = self.subbands[self.main_subband+1].volume >> 2
-            subframe[1] = b0 | (b1 << 1) | (b2 << 2) | (b3 << 3)
-        else:
-            self.inverse = ms.inverse 
+                subframe[b] = (cb.volume<<1) | cb.inverse
 
+        # format metadata
+        to_del = 0
+        if self.format == 8:
+            packed_from = 8
+            to_pack = 0
+        elif self.format == 6:
+            packed_from = 4
+            to_pack = 2
+        elif self.format == 4:
+            packed_from = 1
+            to_pack = 3
+            if self.main_subband>3:
+                to_del = 1
+        elif self.format == 2:
+            packed_from = 1
+            to_pack = 1
+            if self.main_subband<1:
+                to_del = 0
+            elif self.main_subband<7:
+                to_del = self.main_subband - 1
+            else:
+                to_del = 5
+        elif self.format == 1:
+            packed_from = 1
+            to_pack = 0
+            to_del = self.main_subband
+
+        # convert packed subbands
+        for b in range(packed_from,8):
+            if b <= self.main_subband:
+                subframe[b] = subframe[b]>>2 # ia00 -> ia
+            else:
+                subframe[b] = ((subframe[b] & 8) >> 2) | (subframe[b] & 1) # a00i -> ai
+
+        # save saved I
+        self.inverse = self.subbands[to_del].inverse
+
+        # delete deleted subbands
+        for i in range(to_del):
+            del subframe[1]
+
+        # pack packed subbands
+        src = packed_from
+        dst = packed_from
+        for i in range(to_pack):
+            subframe[dst] = (subframe[src+1] << 2) | subframe[src]
+            src += 2
+            dst += 1
+
+        # set main subband and inverse
         subframe[0] = (self.inverse << 3) | self.main_subband
 
+        # put subframe into main frame
         for i in range(self.format):
             frame[self.frame_offset + i] = subframe[i]
 
     def decode(self, frame):
+        # main volume, subband and inverse
         self.volume = frame[self.band]
         self.main_subband = frame[self.frame_offset] & 0x7
         self.inverse = frame[self.frame_offset] >> 3
 
+        # reset subbands
         for b in range(8):
             cs = self.subbands[b]
             cs.volume = 0
             cs.inverse = 0
 
+        #main subband volume
         ms = self.subbands[self.main_subband]
         ms.volume = 8
-        ms.inverse = self.inverse
 
-        if self.format in (4,6,8):
-            if self.format == 8:
-                subframe = frame[self.frame_offset:self.frame_offset+8]
-            elif self.format == 6:
-                subframe_packed = frame[self.frame_offset:self.frame_offset+6]
-                subframe = subframe_packed[:4]
-                subframe += [subframe_packed[4] & 3,subframe_packed[4]>>2]
-                subframe += [subframe_packed[5] & 3,subframe_packed[5]>>2]
-
-                for b in range(4,8):
-                    if b <= self.main_subband:
-                        subframe[b] = subframe[b]<<2 # ia -> ia00
-                    else:
-                        subframe[b] = ((subframe[b] & 2) << 2) | (subframe[b] & 1) # ai -> a00i
-            elif self.format == 4:
-                    subframe_packed = frame[self.frame_offset:self.frame_offset+4]
-                    subframe = subframe_packed[:1]
-                    if self.main_subband>3:
-                        subframe += [0]
-
-                    subframe += [subframe_packed[1] & 3,subframe_packed[1]>>2]
-                    subframe += [subframe_packed[2] & 3,subframe_packed[2]>>2]
-                    subframe += [subframe_packed[3] & 3,subframe_packed[3]>>2]
-
-                    if self.main_subband<4:
-                        subframe += [0]
-
-                    for b in range(1,8):
-                        if b <= self.main_subband:
-                            subframe[b] = subframe[b]<<2 # ia -> ia00
-                        else:
-                            subframe[b] = ((subframe[b] & 2) << 2) | (subframe[b] & 1) # ai -> a00i
-
-                    if self.main_subband>3:
-                        subframe[1] = self.inverse << 3
-                        self.inverse = 0
-
-            offset = 1
-            for b in range(8):
-                cs = self.subbands[b]
-                if b < self.main_subband:
-                    cs.volume = subframe[offset] & 0x7
-                    cs.inverse = subframe[b] >> 3
-                    offset += 1
-                elif b == self.main_subband:
-                    cs.inverse = subframe[b] >> 3
-                else:
-                    cs.volume = subframe[offset] >> 1
-                    cs.inverse = subframe[offset] & 1
-                    offset += 1
-
+        # format metadata
+        to_del = 0
+        if self.format == 8:
+            packed_from = 8
+            to_pack = 0
+        elif self.format == 6:
+            packed_from = 4
+            to_pack = 2
+        elif self.format == 4:
+            packed_from = 1
+            to_pack = 3
+            if self.main_subband>3:
+                to_del = 1
         elif self.format == 2:
-            dat = frame[self.frame_offset+1]
-            b3 = (dat & 8)>>3
-            b2 = (dat & 4)>>2
-            b1 = (dat & 2)>>1
-            b0 = dat & 1
-            if self.main_subband == 0:
-                self.subbands[0].volume = 8
-                self.subbands[0].inverse = self.inverse
-                self.subbands[1].volume = b1*4
-                self.subbands[1].inverse = b0
-                self.subbands[2].volume = b3*4
-                self.subbands[2].inverse = b2
-            elif self.main_subband == 7:
-                self.subbands[7].volume = 8
-                self.subbands[7].inverse = b3
-                self.subbands[5].volume = b0*4
-                self.subbands[5].inverse = self.inverse
-                self.subbands[6].volume = b2*4
-                self.subbands[6].inverse = b1
+            packed_from = 1
+            to_pack = 1
+            if self.main_subband<1:
+                to_del = 0
+            elif self.main_subband<7:
+                to_del = self.main_subband - 1
             else:
-                self.subbands[self.main_subband].inverse = b1
-                self.subbands[self.main_subband-1].volume = b0*4
-                self.subbands[self.main_subband-1].inverse = self.inverse
-                self.subbands[self.main_subband+1].volume = b3*4
-                self.subbands[self.main_subband+1].inverse = b2
+                to_del = 5
+        elif self.format == 1:
+            packed_from = 1
+            to_pack = 0
+            to_del = self.main_subband
+
+        # unpack packed subbands
+        subframe_packed = frame[self.frame_offset:self.frame_offset+self.format]
+        subframe = subframe_packed[:] + [0] * (8 - len(subframe_packed))
+
+        src = packed_from
+        dst = packed_from
+        for i in range(to_pack):
+            subframe[dst] = subframe_packed[src] & 3
+            subframe[dst+1] = subframe_packed[src]>>2
+            src += 1
+            dst += 2
+
+        # recover deleted subbands
+        for i in range(to_del):
+            subframe.insert(1,0)
+
+        subframe = subframe[:8]
+
+        # convert packed subbands
+        for b in range(packed_from,8):
+            if b <= self.main_subband:
+                subframe[b] = subframe[b]<<2 # ia -> ia00
+            else:
+                subframe[b] = ((subframe[b] & 2) << 2) | (subframe[b] & 1) # ai -> a00i
+
+        # parse base frame
+        offset = 1
+        for b in range(8):
+            cs = self.subbands[b]
+            if b < self.main_subband:
+                cs.volume = subframe[offset] & 0x7
+                cs.inverse = subframe[b] >> 3
+                offset += 1
+            elif b == self.main_subband:
+                cs.inverse = subframe[b] >> 3
+            else:
+                cs.volume = subframe[offset] >> 1
+                cs.inverse = subframe[offset] & 1
+                offset += 1
+
+        # recover saved I
+        self.subbands[to_del].inverse = self.inverse
 
     def generate(self, frame):
         band_frame = array([0.0] * len(frame))
@@ -474,8 +468,10 @@ def decode(fn, ofn, start, num):
     hdr = input.read(2)
     if hdr[0] == '\x07':
         frame_factory = Frame7
+        print "codec 7"
     else:
         frame_factory = Frame9
+        print "codec 9"
     #print "hdr", `hdr`
 
     nb = frame_factory().frame_len/2
@@ -517,7 +513,7 @@ def decode(fn, ofn, start, num):
         #print frame_num, max(result), min(result)
 
         out_frame = result * meta.filter1 + prev_result * meta.filter2
-        out_frame = [ int(filter.next(a*4000.0)) for a in out_frame ]
+        out_frame = [ int(filter.next(a*12000.0)) for a in out_frame ]
         odata = struct.pack('h'*meta.frame_len,*out_frame)
         out.writeframes(odata)
         prev_result = result
