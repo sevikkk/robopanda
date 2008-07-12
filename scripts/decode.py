@@ -81,12 +81,12 @@ class Filter:
             self.max = val
 
         if val>16000:
-            print "WARNING: clipping %d to 16000" % self.max
+            print "WARNING: clipping %d to 16000" % val
             val = 16000
             self.clips += 1
 
         if val<-16000:
-            print "WARNING: clipping -%d to -16000" % self.max
+            print "WARNING: clipping -%d to -16000" % val
             val = -16000
             self.clips += 1
 
@@ -513,7 +513,7 @@ def decode(fn, ofn, start, num):
         #print frame_num, max(result), min(result)
 
         out_frame = result * meta.filter1 + prev_result * meta.filter2
-        out_frame = [ int(filter.next(a*12000.0)) for a in out_frame ]
+        out_frame = [ int(filter.next(a*4000.0)) for a in out_frame ]
         odata = struct.pack('h'*meta.frame_len,*out_frame)
         out.writeframes(odata)
         prev_result = result
