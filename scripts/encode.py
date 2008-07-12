@@ -5,7 +5,7 @@
 """
 
 from numpy.fft import rfft
-from numpy import array
+from numpy import array, concatenate
 import struct
 import sys
 import wave
@@ -15,8 +15,8 @@ import decode
 def encode(fn,ofn):
 
     freq_resp = {
-            0:     10000,
-            1:     7920,
+            0:     5000,
+            1:     4920,
             2:     4715,
             3:     4469,
             4:     4141,
@@ -43,7 +43,8 @@ def encode(fn,ofn):
     assert rdata.getcomptype() == "NONE"
 
     rate = rdata.getframerate()
-    frame_len = int(rate * 0.016)
+    read_len = int(rate * 0.016) 
+    frame_len = int(read_len*1) 
 
     decode.meta = decode.Meta(frame_len)
 
@@ -73,19 +74,43 @@ def encode(fn,ofn):
     while 1:
         prev_data = cur_data
         cur_data = next_data
+        pos = rdata.tell()
         next_data = rdata.readframes(frame_len)
 
         if len(next_data) != frame_len*2:
             break
+
+        rdata.setpos(pos + read_len)
 
         next_data = array(struct.unpack("h"*frame_len, next_data))
 
         frame = decode.Frame9()
 
         #data = cur_data - decode.meta.filter1*(next_data - decode.meta.filter2*cur_data) - decode.meta.filter2*(prev_data - decode.meta.filter2*cur_data)
-        data = cur_data + cur_data + next_data + prev_data
         #data = cur_data
-        data = data * array([1.0/16384/3])
+
+        if 0:
+            data = cur_data + cur_data + next_data + prev_data
+            data = data * array([1.0/16384/3])
+
+        if 1:
+            data = cur_data + prev_data
+            data = data * array([1.0/16384/2])
+
+        if 0:
+            data = cur_data
+            data = data * array([1.0/16384])
+
+        if 0:
+            # http://en.wikipedia.org/wiki/Modified_discrete_cosine_transform
+            half_frame = frame_len/2
+            a = prev_data[:half_frame]
+            b = prev_data[half_frame:]
+            c = cur_data[:half_frame]
+            d = cur_data[half_frame:]
+
+            data = concatenate((- c[::-1] - d , a - b[::-1]))
+            data = data * array([1.0/16384/2])
 
         fd = rfft(data, frame_len).tolist()
         f = 62.5
@@ -95,8 +120,10 @@ def encode(fn,ofn):
             (bc, sc), (bs, ss) = freq_map[f]
             corr = 5000.0/freq_resp[bc]
 
-            if f<250:
-                a = abs(a) + 0j
+            #if f<350:
+            #    a = 0 + 0j
+
+            #a = abs(a) + 0j
 
             if bc>=0 and bc<=15:
                 frame.bands[bc].subbands[sc].volume = abs(a.real)/decode.meta.frame_len*corr
