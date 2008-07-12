@@ -62,12 +62,14 @@ class CPU:
             [ 0x2979, 0xFFFF, "return_f0" ],
             [ 0x297E, 0xFFFF, "drop" ],
             #2A00
-            #2B00
+            [ 0x2B00, 0xFF00, "alu_local" ],
             [ 0x2D00, 0xFF80, "push_local" ],
             [ 0x2D80, 0xFF80, "pop_local" ],
             [ 0x2EC0, 0xFFF0, "inc_local" ],
             #2F00
             #...
+            [ 0x8500, 0xFF00, "cmp_local_ne" ],
+            [ 0x9500, 0xFF00, "cmp_local" ],
             #A700
             [ 0xA800, 0xFC00, "set_local" ],
             [ 0xB000, 0xF000, "spi_read" ],
@@ -271,6 +273,29 @@ class CPU:
                 descr = "pop and drop value from stack",
             )
 
+    def decode_alu_local(self, cmd):
+
+        op = cmd & 0xE0
+        op = {
+                0x00: "alu_0",
+                0x20: "alu_2",
+                0x40: "and",
+                0x60: "or",
+                0x80: "xor",
+                0xA0: "alu_a",
+                0xC0: "add",
+                0xE0: "sub",
+            }[op]
+
+        reg = cmd & 0x1F
+
+        return Decode_Result(
+                op,
+                "$%02X" % (reg,),
+                descr = "%s local %02X with stack and put result to stack" % (op, reg),
+                exec_data = (op, reg),
+            )
+
     def decode_push_local(self, cmd):
 
         arg = cmd & 0xF
@@ -302,6 +327,30 @@ class CPU:
                 "$%02X" % (arg,),
                 descr = "increment local %02X and push old value to stack" % (arg),
                 exec_data = arg,
+            )
+
+    def decode_cmp_local_ne(self, cmd):
+
+        reg = (cmd & 0xF0) >> 4
+        arg = cmd & 0xF
+
+        return Decode_Result(
+                "cmp",
+                "$%02X, !#%02X" % (reg, arg),
+                descr = "? $%02X != %02X" % (reg, arg),
+                exec_data = (reg, arg)
+            )
+
+    def decode_cmp_local(self, cmd):
+
+        reg = (cmd & 0xF0) >> 4
+        arg = cmd & 0xF
+
+        return Decode_Result(
+                "cmp",
+                "$%02X, #%02X" % (reg, arg),
+                descr = "? $%02X == %02X" % (reg, arg),
+                exec_data = (reg, arg)
             )
 
     def decode_set_local(self, cmd):
