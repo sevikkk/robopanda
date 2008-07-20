@@ -16,7 +16,7 @@ def main(fn):
 
     print "============== Audio data ======================"
     addr = 5
-    n = 0
+    n = 1
     while 1:
         a = cartridge.read_int32(addr)
         a = a & 0xffffff
