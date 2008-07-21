@@ -92,6 +92,12 @@ main_loop:
 	skip !'d'
 	jump $do_d
 
+	skip !'t'
+	jump $do_t
+
+	skip !'T'
+	jump $do_tt
+
 	skip !'0'
 	jump $do_digit
 	skip !'1'
@@ -416,3 +422,117 @@ d_loop:
 	write r2
 
         jump $main_loop
+
+do_t:
+	read #0
+	write idx
+	read #1
+	write r2
+
+t_loop:
+	jump $t_loop,!tx_empty
+
+t_next:
+	jump $main_loop,rx_rdy
+	readdram @idx+
+	write r0
+	shift right8
+	shift right8
+	shift right8
+	shift right1
+	shift right1
+	shift right1
+	shift right1
+	shift right1
+	skip !5
+	jump $t_next
+	skip !3
+	jump $t_dump
+	read idx
+	sub  r2
+	write idx
+        jump $t_next
+
+t_dump:
+	readdram @idx+
+
+	writeuart acc,hex3
+	writeuart ":"
+
+	read r0
+	shift right8
+	shift right8
+	writeuart acc,hex1
+	writeuart " "
+
+        jump $t_loop
+
+do_tt:
+	read #0
+	write idx
+	read #1
+	write r2
+	read #0xFFFFFF
+	write r3
+
+tt_loop:
+	jump $tt_loop,!tx_empty
+
+tt_next:
+	jump $main_loop,rx_rdy
+	readdram @idx+
+	write r0
+	shift right8
+	shift right8
+	shift right8
+	shift right1
+	shift right1
+	shift right1
+	shift right1
+	shift right1
+	skip !5
+	jump $tt_next
+	skip !3
+	jump $tt_dump
+	read idx
+	sub  r2
+	write idx
+        jump $tt_next
+
+tt_dump:
+	readdram @idx+
+	and r3
+	
+	skip !0xAAAA
+	jump $tt_locals
+	skip !0xFFFE
+	jump $tt_stack
+	skip !0xCCCC
+	jump $tt_done
+
+	shift right1
+	write r0
+	shift right1
+	shift right1
+	shift right1
+	shift right8
+	skip =2
+	jump $tt_next
+
+	read r0
+	writeuart acc,hex1
+	writeuart " "
+
+        jump $tt_loop
+
+tt_locals:
+	writeuart "\r\nlocals: "
+        jump $tt_loop
+
+tt_stack:
+	writeuart "\r\nstack: "
+        jump $tt_loop
+
+tt_done:
+	writeuart "\r\n"
+        jump $tt_loop
