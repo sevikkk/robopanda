@@ -13,7 +13,7 @@ def main(config, result):
     code = []
     mover = [0xF000]
     code_labels = {}
-    mover_entries = {}
+    mover_entries = { 0: 0}
     refs = {}
     max_audio = 0
 
@@ -55,7 +55,7 @@ def main(config, result):
             print "unparsed line:", " ".join(line)
 
     index = (max_audio + 1)*3 + 0x20
-    index = (int(index + 0x100)/0x100)*0x100
+    index = int((index + 0x100)/0x100)*0x100
     data = StringIO.StringIO()
     #data.seek(8*1024*1024-1)
     #data.write('\x00')
@@ -101,7 +101,7 @@ def main(config, result):
     data.write(struct.pack("<H",version))
 
     data.seek(audio_ptr)
-    n = 1
+    al = 0
     aidx = {}
     aks = audio.keys()
     aks.sort()
