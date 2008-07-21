@@ -4,8 +4,9 @@ class EmulationError(Exception):
     pass
 
 class Decode_Result:
-    def __init__(self, cmd, args = None, cmd_len = 1, descr = None, executor = None, next_addrs = None, barrier = 0, xrefs = [], exec_data = None):
+    def __init__(self, cmd, args = None, cmd_len = 1, descr = None, executor = None, next_addrs = None, barrier = 0, xrefs = [], exec_data = None, exec_cmd = None):
         self.cmd = cmd               # command name
+        self.exec_cmd = exec_cmd               # command name
         self.args = args             # command arguments
         self.cmd_len = cmd_len       # command length in words
         self.descr = descr           # description of command (f.e.: "pop and compare", "branch if flag0")
@@ -16,10 +17,10 @@ class Decode_Result:
         self.xrefs = xrefs           # cross refs
 
 class Execute_Result:
-    def __init__(self, npc = None, action = None, state = None):
+    def __init__(self, action = None, state = None, time = 0.05):
         self.action = action   # action executed in this cycle (f.e.: "$0 = 0x13", "@45 = 0x45")
-        self.npc = npc         # new value of pc for branches/calls (if not pc + len)
-        self.state = state     # new state of cpu (locals, globals, stack, etc)
+        self.time = time   # time to next cycle ("m" - wait for mover, "p" - wait for player)
+        self.state = state
 
 class CPU_State:
     def __init__(self, clone_from = None):
@@ -29,6 +30,8 @@ class CPU_State:
             self.globals = {}
             self.locals = {}
             self.locals_offset = 0
+            self.flag_f0 = False
+            self.flag_e8 = False
         else:
             old = clone_from
             self.stack = old.stack[:]
@@ -36,6 +39,8 @@ class CPU_State:
             self.globals = old.globals.copy()
             self.locals = old.locals.copy()
             self.locals_offset = old.locals_offset
+            self.flag_f0 = old.flag_f0
+            self.flag_e8 = old.flag_e8
 
 class CPU:
     bytecodes = [
@@ -93,6 +98,20 @@ class CPU:
 
         self.labels = {}
 
+    def fetch(self, pc):
+        return self.c.read_int16(pc * 2 + self.ib)
+
+    def fetch_next(self, offset = 0):
+        return self.c.read_int16((self.state.pc + offset) * 2 + self.ib)
+
+    def format_addr(self, addr):
+        if addr in self.labels:
+            addr = self.labels[addr]
+        else:
+            addr = "%04X" % addr
+
+        return addr
+
     def decode(self, pc = None):
         if pc is not None:
             self.state.pc = pc # for disassembler and likes
@@ -105,7 +124,24 @@ class CPU:
                 break
 
         decoder = getattr(self, "decode_" + cmd_txt)
-        return decoder(cmd)
+        res = decoder(cmd)
+        res.exec_cmd = cmd_txt
+        return res
+
+    def execute(self, decoded, hint = None):
+        state = CPU_State(self.state)
+        state.pc += decoded.cmd_len
+
+        if decoded.executor:
+            executor = decoded.executor
+        else:
+            executor = getattr(self, "execute_" + decoded.exec_cmd)
+
+        result = executor(decoded, state, hint)
+
+        self.state = result.state
+
+        return result
 
     def decode_push_imm(self, cmd):
 
@@ -124,6 +160,17 @@ class CPU:
                 cmd_len = cmd_len,
             )
 
+    def execute_push_imm(self, decoded, state, hint):
+
+        val = decoded.exec_data
+
+        state.stack.append(val)
+
+        return Execute_Result(
+                action = "push #%04X" % (val, ),
+                state = state
+            )
+
     def decode_cmp(self, cmd):
         arg = cmd & 0xFF
 
@@ -132,6 +179,17 @@ class CPU:
                 "#%02X" % arg,
                 descr = "pop value from stack and compare with arg",
                 exec_data = arg,
+            )
+
+    def execute_cmp(self, decoded, state, hint):
+
+        arg = state.stack.pop()
+        val = decoded.exec_data
+        state.flag_f0 = (arg == val)
+
+        return Execute_Result(
+                action = "flag_f0 = %s" % (state.flag_f0),
+                state = state
             )
 
     def decode_push_glbl(self, cmd):
@@ -150,6 +208,18 @@ class CPU:
                 exec_data = arg,
                 xrefs = [("globals", arg)],
                 cmd_len = cmd_len,
+            )
+
+    def execute_push_glbl(self, decoded, state, hint):
+
+        reg = decoded.exec_data
+
+        val = state.globals[reg]
+        state.stack.append(val)
+
+        return Execute_Result(
+                action = "push @%04X(#%04X)" % (reg, val),
+                state = state
             )
 
     def decode_push_glbl_offs(self, cmd):
@@ -188,6 +258,17 @@ class CPU:
                 cmd_len = cmd_len,
             )
 
+    def execute_pop_glbl(self, decoded, state, hint):
+
+        arg = state.stack.pop()
+        addr = decoded.exec_data
+        state.globals[addr] = arg
+
+        return Execute_Result(
+                action = "@%04X = #%04X" % (addr, arg),
+                state = state
+            )
+
     def decode_pop_glbl_offs(self, cmd):
 
         cmd_len = 1
@@ -206,10 +287,31 @@ class CPU:
                 cmd_len = cmd_len,
             )
 
+    def execute_pop_glbl_offs(self, decoded, state, hint):
+
+        arg = state.stack.pop()
+        val = state.stack.pop()
+        addr = decoded.exec_data
+        state.globals[addr + arg] = val
+
+        return Execute_Result(
+                action = "@%04X = #%04X" % (addr + arg, val),
+                state = state
+            )
+
     def decode_expand(self, cmd):
         return Decode_Result(
                 "expand",
                 descr = "push 0 to stack (???)",
+            )
+
+    def execute_expand(self, decoded, state, hint):
+
+        state.stack.append(0)
+
+        return Execute_Result(
+                action = "push #0",
+                state = state
             )
 
     def decode_gpio(self, cmd):
@@ -248,6 +350,18 @@ class CPU:
                 descr = "pop nvram addres from stack, read and put result on stack",
             )
 
+    def execute_nvram_read(self, decoded, state, hint):
+
+        addr = state.stack.pop()
+
+        val = 0
+        state.stack.append(val)
+        
+        return Execute_Result(
+                action = "push nvram[%04X] (%04X)" % (addr, val),
+                state = state
+            )
+
     def decode_move(self, cmd):
         return Decode_Result(
                 "move",
@@ -258,7 +372,8 @@ class CPU:
         return Decode_Result(
                 "return",
                 descr = "pop return addr from stack, pop locals from stack, and continue from return addr",
-                barrier = 1
+                barrier = 1,
+                executor = self.execute_return_f0
             )
 
     def decode_return_f0(self, cmd):
@@ -267,10 +382,47 @@ class CPU:
                 descr = "check flag and return",
             )
 
+    def execute_return_f0(self, decoded, state, hint):
+        if decoded.exec_cmd == "return":
+            do = True
+            action = "return"
+        elif decoded.exec_cmd == "return":
+            do = state.flag_f0
+            if do:
+                action = "return (taken)"
+            else:
+                action = "return (not taken)"
+
+        if do:
+            npc = state.stack.pop() - self.ib/2
+
+            mods = self.fetch(npc)
+            nargs = mods >> 8
+            nlocals = mods & 0xff
+
+            state.locals_offset -= nlocals # save locals
+
+            npc += 1
+            state.pc = npc
+
+        return Execute_Result(
+                action = action,
+                state = state
+            )
+
     def decode_drop(self, cmd):
         return Decode_Result(
                 "drop",
                 descr = "pop and drop value from stack",
+            )
+
+    def execute_drop(self, decoded, state, hint):
+
+        state.stack.pop()
+
+        return Execute_Result(
+                action = "drop",
+                state = state
             )
 
     def decode_alu_local(self, cmd):
@@ -322,6 +474,18 @@ class CPU:
                 exec_data = arg,
             )
 
+    def execute_push_local(self, decoded, state, hint):
+
+        reg = decoded.exec_data
+
+        val = state.locals[reg + state.locals_offset]
+        state.stack.append(val)
+
+        return Execute_Result(
+                action = "push $%02X(#%04X)" % (reg,val),
+                state = state
+            )
+
     def decode_pop_local(self, cmd):
 
         arg = cmd & 0xF
@@ -333,6 +497,19 @@ class CPU:
                 exec_data = arg,
             )
 
+
+    def execute_pop_local(self, decoded, state, hint):
+
+        reg = decoded.exec_data
+
+        val = state.stack.pop()
+        state.locals[reg + state.locals_offset] = val
+
+        return Execute_Result(
+                action = "pop $%02X(#%04X)" % (reg,val),
+                state = state
+            )
+
     def decode_inc_local(self, cmd):
 
         arg = cmd & 0xF
@@ -342,6 +519,20 @@ class CPU:
                 "$%02X" % (arg,),
                 descr = "increment local $%02X and push old value to stack" % (arg),
                 exec_data = arg,
+            )
+
+    def execute_inc_local(self, decoded, state, hint):
+
+        reg = decoded.exec_data
+
+        val = state.locals[reg + state.locals_offset]
+        state.stack.append(val)
+        val += 1
+        state.locals[reg + state.locals_offset] = val
+
+        return Execute_Result(
+                action = "push #%04X, $%02X = #%04X" % (val - 1, reg, val),
+                state = state
             )
 
     def decode_cmp_local_ne(self, cmd):
@@ -380,6 +571,17 @@ class CPU:
                 exec_data = (reg, arg)
             )
 
+    def execute_set_local(self, decoded, state, hint):
+
+        reg, arg = decoded.exec_data
+
+        state.locals[reg + state.locals_offset] = arg
+
+        return Execute_Result(
+                action = "$%02X = #%04X" % (reg, arg),
+                state = state
+            )
+
     def decode_spi_read(self, cmd):
 
         cmd_len = 1
@@ -399,64 +601,65 @@ class CPU:
                 xrefs = [("data", arg)],
             )
 
+    def execute_spi_read(self, decoded, state, hint):
+
+        arg = state.stack.pop()
+        addr = decoded.exec_data + arg
+
+        val = self.fetch(addr)
+        state.stack.append(val)
+        
+        return Execute_Result(
+                action = "push rom[%04X] (%04X)" % (addr, val),
+                state = state
+            )
+
     def decode_call(self, cmd):
 
-        result = Decode_Result("call")
-
+        cmd_len = 1
         addr = cmd & 0x1FFF
 
         if addr == 0x1FFF:
             addr = self.fetch_next(1)
-            result.cmd_len += 1
+            cmd_len += 1
 
         addr += self.cx_off
 
-        mods = self.fetch_next(result.cmd_len)
-        result.cmd_len += 1
+        mods = self.fetch_next(cmd_len)
+        cmd_len += 1
 
         nargs = mods >> 8
         nlocals = mods & 0xff
 
-        result.exec_data = (addr, nargs, nlocals)
-        result.args = "%s(%d,%d)" % (self.format_addr(addr), nargs, nlocals)
-        result.descr = "save %d locals and call %04X with %d args from stack)" % (nlocals, addr, nargs)
-        result.next_addrs = [addr]
-        result.xrefs = [("code_global", addr)]
-        return result
+        return Decode_Result(
+                "call",
+                "%s(%d,%d)" % (self.format_addr(addr), nargs, nlocals),
+                descr = "save %d locals and call %04X with %d args from stack)" % (nlocals, addr, nargs),
+                exec_data = (addr, nargs, nlocals),
+                cmd_len = cmd_len,
+                next_addrs = [addr],
+                xrefs = [("code_global", addr)],
+            )
 
-    def execute_call(self, cmd, new_state):
-        pc = self.state.pc
+    def execute_call(self, decoded, state, hint):
 
-        addr = cmd & 0x1FFF
-        if addr == 0x1FFF:
-            addr = self.fetch(pc + 1)
-            statepc += 1
+        addr, nargs, nlocals = decoded.exec_data
 
-        ret = npc
+        ret = state.pc - 1
 
-        mods = self.fetch(npc)
-        nargs = mods >> 8
-        nlocals = mods & 0xff
+        state.locals_offset += nlocals # save locals
 
-        self.locals_offset += nlocals # save locals
+        args = state.stack[:nargs] # pop args
+        state.stack = state.stack[nargs:]
 
-        args = self.stack[:nargs] # pop args
-        self.stack = self.stack[nargs:]
+        state.stack.append(ret + self.ib/2) # push return address
+        state.stack += args  # push args
 
-        self.stack.append(ret + self.ib/2) # push return address
-        self.stack += args  # push args
-
-        npc = addr + self.cx_off
-        result = Cmd_Result()
-        print "%9.3f %06X [CPU] %06X: call %04X // stack: %s" % (ts, real_addr, pc, npc, self.dump_stack())
-
-    def format_addr(self, addr):
-        if addr in self.labels:
-            addr = self.labels[addr]
-        else:
-            addr = "%04X" % addr
-
-        return addr
+        state.pc = addr
+        return Execute_Result(
+                action = "call %04X(%s)" % (addr, ",".join(["%s" % a for a in args])),
+                state = state
+            )
 
     def decode_rjump(self, cmd):
         offset = (cmd & 0x7FF)
@@ -473,6 +676,17 @@ class CPU:
                 xrefs = [("code_local", addr)],
                 next_addrs = [addr],
                 barrier = 1,
+            )
+
+    def execute_rjump(self, decoded, state, hint):
+
+        addr = decoded.exec_data
+
+        state.pc = addr
+
+        return Execute_Result(
+                action = "jump %04X" % (addr, ),
+                state = state
             )
 
     def decode_rjump_e8(self, cmd):
@@ -507,6 +721,21 @@ class CPU:
                 next_addrs = [addr],
             )
 
+    def execute_rjump_f0(self, decoded, state, hint):
+
+        addr = decoded.exec_data
+
+        if state.flag_f0:
+            state.pc = addr
+            action = "taken"
+        else:
+            action = "not taken"
+
+        return Execute_Result(
+                action = "jump %04X (%s)" % (addr, action),
+                state = state
+            )
+
     def decode_rjump_arg(self, cmd):
         offset = (cmd & 0x7FF)
         if offset & 0x400 != 0:
@@ -531,15 +760,9 @@ class CPU:
         result = Decode_Result("unknown", args)
         return result
 
-    def fetch(self, pc):
-        return self.c.read_int16(pc * 2 + self.ib)
-
-    def fetch_next(self, offset = 0):
-        return self.c.read_int16((self.state.pc + offset) * 2 + self.ib)
-
     def dump_stack(self):
         s = []
-        st = self.stack[:]
+        st = self.state.stack[:]
         st.reverse()
         for a in st:
             s.append("%04X" % a)
@@ -548,15 +771,17 @@ class CPU:
 
     def do_one_cmd(self, ts, real_addr):
         real_pc = (real_addr - self.ib)/2
-        if self.pc != real_pc:
-            #print "[WARNING] pc != real_pc: %06X != %06X" % (self.pc, real_pc)
-            #try:
-            #    print "alt_branch: %06X" % self.alt_branch
-            #except:
-            #    print "alt_branch: %s" % self.alt_branch
-            if self.alt_branch == real_pc:
-                self.pc = self.alt_branch
+        if self.state.pc != real_pc:
+            print "[ERROR] pc != real_pc: %06X != %06X" % (self.state.pc, real_pc)
+
+        assert self.state.pc == real_pc
+
+        hint = None
+        decoded = self.decode()
+        execed = self.execute(decoded, hint)
+        print "%9.3f %06X [CPU] %06X: %-9s %-20s // %s, stack: %s" % (ts, real_addr, real_pc, decoded.cmd, decoded.args or "", execed.action or "", self.dump_stack())
             
+    def bubu(self):
         self.alt_branch = None
         pc = self.pc
         npc = pc + 1
