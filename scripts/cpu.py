@@ -277,12 +277,12 @@ class CPU:
 
         op = cmd & 0xE0
         op = {
-                0x00: "alu_0",
-                0x20: "alu_2",
+                0x00: "repli", # replace with immediate
+                0x20: "addi",  # add immediate
                 0x40: "and",
                 0x60: "or",
                 0x80: "xor",
-                0xA0: "alu_a",
+                0xA0: "mod",
                 0xC0: "add",
                 0xE0: "sub",
             }[op]
