@@ -289,10 +289,25 @@ class CPU:
 
         reg = cmd & 0x1F
 
-        return Decode_Result(
+        if op == 'addi':
+            return Decode_Result(
+                op,
+                "#%02X" % (reg,),
+                descr = "add #%02X to stack top " % (reg, ),
+                exec_data = (op, reg),
+            )
+        elif op == 'repli':
+            return Decode_Result(
+                op,
+                "#%02X" % (reg,),
+                descr = "replace top of stack with #%02X" % (reg, ),
+                exec_data = (op, reg),
+            )
+        else:
+            return Decode_Result(
                 op,
                 "$%02X" % (reg,),
-                descr = "%s local %02X with stack and put result to stack" % (op, reg),
+                descr = "%s local $%02X with stack and put result to stack" % (op, reg),
                 exec_data = (op, reg),
             )
 
@@ -303,7 +318,7 @@ class CPU:
         return Decode_Result(
                 "push",
                 "$%02X" % (arg,),
-                descr = "push local %02X to stack" % (arg),
+                descr = "push local $%02X to stack" % (arg),
                 exec_data = arg,
             )
 
@@ -314,7 +329,7 @@ class CPU:
         return Decode_Result(
                 "pop",
                 "$%02X" % (arg,),
-                descr = "pop local %02X from stack" % (arg),
+                descr = "pop local $%02X from stack" % (arg),
                 exec_data = arg,
             )
 
@@ -325,7 +340,7 @@ class CPU:
         return Decode_Result(
                 "inc",
                 "$%02X" % (arg,),
-                descr = "increment local %02X and push old value to stack" % (arg),
+                descr = "increment local $%02X and push old value to stack" % (arg),
                 exec_data = arg,
             )
 
@@ -372,6 +387,8 @@ class CPU:
         if arg == 0xFFF:
             arg = self.fetch_next(1)
             cmd_len = 2
+
+        arg += self.cx_off
 
         return Decode_Result(
                 "spi_read",
