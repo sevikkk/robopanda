@@ -120,6 +120,7 @@ class CPU:
             [ 0x2929, 0xFFFF, "nvram_write" ],
             [ 0x292A, 0xFFFF, "nvram_read" ],
             [ 0x292F, 0xFFFF, "move" ],
+            [ 0x2960, 0xFFF0, "alu" ],
             [ 0x2978, 0xFFFF, "return" ],
             [ 0x2979, 0xFFFF, "return_if1" ],
             [ 0x297E, 0xFFFF, "drop" ],
@@ -712,6 +713,50 @@ class CPU:
         return Decode_Result(
                 "move",
                 descr = "pop mover script index from stack and start moving",
+            )
+
+    def decode_alu(self, cmd):
+        op = [
+                ("and", lambda x,y: x & y ),
+                ("or", lambda x,y: x | y ),
+                ("xor", lambda x,y: x ^ y ),
+                ("mod", lambda x,y: x % y ),
+                ("add", lambda x,y: x + y ),
+                ("sub", lambda x,y: x - y ),
+                ("mul", lambda x,y: x * y ),
+                ("div", lambda x,y: x / y ),
+                ("cmp_eq", lambda x,y: x == y ),
+                ("cmp_ne", lambda x,y: x != y ),
+                ("cmp_gt", lambda x,y: x > y ),
+                ("cmp_ge", lambda x,y: x >= y ),
+                ("cmp_lt", lambda x,y: x < y ),
+                ("cmp_le", lambda x,y: x <= y ),
+                ("shl", lambda x,y: x >> y ),
+                ("shr", lambda x,y: x << y )
+             ][cmd & 15]
+
+        return Decode_Result(
+                op[0],
+                descr = "pop two args from stack and push result",
+                exec_data = op[1],
+            )
+
+    def execute_alu(self, decoded, state, hint):
+
+        arg2 = state.stack.pop()
+        arg1 = state.stack.pop()
+        result = decoded.exec_data(arg1, arg2)
+        if decoded.cmd.startswith("cmp_"):
+            if result:
+                result = 1
+            else:
+                result = 0
+
+        state.stack.append(result)
+        
+        return Execute_Result(
+                action = "do op with stack",
+                state = state
             )
 
     def decode_return(self, cmd):
